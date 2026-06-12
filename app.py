@@ -254,6 +254,39 @@ def save_playback_progress(file_path, vlc_time, vlc_length, force=False):
     save_config(config)
     print(f"[VLC] Saved progress: {os.path.basename(file_path)} at {vlc_time}s / {vlc_length}s ({percent:.1f}%)")
 
+def update_anilist_sync_status_for_file(file_path):
+    """Resolves mal_id/episode_number for file_path and resets the AniList sync state.
+    Used both when launching a file via the API and when VLC auto-advances to the
+    next playlist track (so each new episode gets its own sync check)."""
+    config_for_mal = load_config()
+    anime_dir = config_for_mal.get("anime_dir", r"C:\Anime")
+    mal_id = None
+    try:
+        rel = os.path.relpath(file_path, anime_dir)
+        folder_name = rel.split(os.sep)[0]
+        folder_path_for_mal = os.path.join(anime_dir, folder_name)
+        videos_for_mal = []
+        for root, dirs, files in os.walk(folder_path_for_mal):
+            for f in files:
+                if f.lower().endswith(('.mkv', '.mp4', '.avi', '.mov')):
+                    videos_for_mal.append(os.path.join(root, f))
+        folder_mappings = config_for_mal.get("folder_mappings", {})
+        mal_id, _ = resolve_mal_id_for_folder(folder_name, videos_for_mal, folder_mappings)
+
+        # "Kai"/"Henshu" recaps have different episode numbering than the
+        # original series tracked on AniList - don't auto-sync these, as the
+        # episode count would not correspond to real story progress.
+        combined_text = (folder_name + " " + os.path.basename(file_path)).lower()
+        if any(kw in combined_text for kw in KAI_KEYWORDS):
+            print(f"[Launcher] '{folder_name}' looks like a Kai/Henshu recap - skipping AniList auto-sync.")
+            mal_id = None
+    except Exception as e:
+        print(f"[Launcher] Could not resolve mal_id for AniList sync: {e}")
+
+    vlc_status_data["mal_id"] = mal_id
+    vlc_status_data["episode_number"] = parse_episode_number(os.path.basename(file_path))
+    vlc_status_data["anilist_synced"] = False
+
 def poll_vlc_status():
     """Background thread function that queries VLC's HTTP API for playback status."""
     global vlc_status_data
@@ -286,7 +319,9 @@ def poll_vlc_status():
                                 try:
                                     for f in os.listdir(parent_dir):
                                         if f == filename or f.lower() == filename.lower():
-                                            vlc_status_data["file_path"] = os.path.join(parent_dir, f).replace("\\", "/")
+                                            new_path = os.path.join(parent_dir, f).replace("\\", "/")
+                                            vlc_status_data["file_path"] = new_path
+                                            update_anilist_sync_status_for_file(new_path)
                                             print(f"[VLC] Auto-detected playlist track change. New active file: {f}")
                                             break
                                 except Exception as e:
@@ -2473,34 +2508,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                         vlc_status_data["percent"] = 0
 
                         # Resolve mal_id/episode number for automatic AniList progress sync
-                        config_for_mal = load_config()
-                        anime_dir = config_for_mal.get("anime_dir", r"C:\Anime")
-                        mal_id = None
-                        try:
-                            rel = os.path.relpath(file_path, anime_dir)
-                            folder_name = rel.split(os.sep)[0]
-                            folder_path_for_mal = os.path.join(anime_dir, folder_name)
-                            videos_for_mal = []
-                            for root, dirs, files in os.walk(folder_path_for_mal):
-                                for f in files:
-                                    if f.lower().endswith(('.mkv', '.mp4', '.avi', '.mov')):
-                                        videos_for_mal.append(os.path.join(root, f))
-                            folder_mappings = config_for_mal.get("folder_mappings", {})
-                            mal_id, _ = resolve_mal_id_for_folder(folder_name, videos_for_mal, folder_mappings)
-
-                            # "Kai"/"Henshu" recaps have different episode numbering than the
-                            # original series tracked on AniList - don't auto-sync these, as the
-                            # episode count would not correspond to real story progress.
-                            combined_text = (folder_name + " " + os.path.basename(file_path)).lower()
-                            if any(kw in combined_text for kw in KAI_KEYWORDS):
-                                print(f"[Launcher] '{folder_name}' looks like a Kai/Henshu recap - skipping AniList auto-sync.")
-                                mal_id = None
-                        except Exception as e:
-                            print(f"[Launcher] Could not resolve mal_id for AniList sync: {e}")
-
-                        vlc_status_data["mal_id"] = mal_id
-                        vlc_status_data["episode_number"] = parse_episode_number(os.path.basename(file_path))
-                        vlc_status_data["anilist_synced"] = False
+                        update_anilist_sync_status_for_file(file_path)
 
                         # Build playlist of subsequent episodes in the same folder
                         parent_dir = os.path.dirname(file_path)
