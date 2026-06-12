@@ -168,6 +168,47 @@ _ALLOWED_FOLLOWUP_RE = re.compile(
     r'\d{3,4}p|x264|x265|h264|h265|hevc|aac|flac|10bit|8bit)$'
 )
 
+# Japanese ordinal "part/season" markers used by sequels of the same series
+# (e.g. "Enen no Shouboutai: Ni no Shou" = Fire Force Season 2)
+_JAPANESE_SEASON_WORDS = {
+    "ni no shou": 2,
+    "san no shou": 3,
+    "yon no shou": 4,
+    "go no shou": 5,
+    "roku no shou": 6,
+    "nana no shou": 7,
+    "hachi no shou": 8,
+    "kyuu no shou": 9,
+    "kyu no shou": 9,
+    "juu no shou": 10,
+}
+
+def extract_season_number(text):
+    """Extracts a season number from a title/query, if any is indicated.
+
+    Recognizes "S01"/"S01E05", "Season 2", "Saison 3" and Japanese ordinal
+    season markers (e.g. "Ni no Shou" = part/season 2). Returns None if no
+    season indicator is found (i.e. the text doesn't specify a season)."""
+    text_lower = text.lower()
+
+    m = re.search(r's(\d{1,2})e\d+', text_lower)
+    if m:
+        return int(m.group(1))
+
+    m = re.search(r'\bs(\d{1,2})\b', text_lower)
+    if m:
+        return int(m.group(1))
+
+    m = re.search(r'\b(?:season|saison)\s*(\d{1,2})\b', text_lower)
+    if m:
+        return int(m.group(1))
+
+    for phrase, season_num in _JAPANESE_SEASON_WORDS.items():
+        if phrase in text_lower:
+            return season_num
+
+    return None
+
 def _has_extension_after_match(title_lower, end_idx):
     """Returns True if the text right after a title match in `title_lower`
     (starting at end_idx) looks like another title word (a sequel/extension name)
@@ -189,10 +230,23 @@ def _has_extension_after_match(title_lower, end_idx):
         return False
     return True
 
-def check_title_match(v, title):
+def check_title_match(v, title, query_season=None):
     """Checks if the search variation v matches the torrent title with fallback rules."""
     title_lower = title.lower()
     v_lower = v.lower()
+
+    # Reject if the title explicitly indicates a different season than the one
+    # requested (e.g. searching "Fire Force" / season 1 shouldn't match
+    # "Fire Force S03..."). A query without any season indicator defaults to
+    # season 1. A title without any season indicator is assumed compatible.
+    # `query_season` (derived from the full original query) takes precedence
+    # over the season indicator (if any) found in `v` alone, since `v` may be
+    # a simplified variation (e.g. "Enen no Shouboutai" from "Enen no
+    # Shouboutai: Ni no Shou") that lost the season information.
+    season_v = query_season if query_season is not None else (extract_season_number(v_lower) or 1)
+    season_title = extract_season_number(title_lower)
+    if season_title is not None and season_title != season_v:
+        return False
 
     # 1. Try original exact word boundary, but reject if the matched title is
     # immediately followed by another title word (sequel/extension, e.g. "Shippuden")
@@ -1831,6 +1885,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             
             # Build search queries (strictly VOSTFR as requested)
             search_queries = []
+            query_seasons = {}
             for title_item in input_titles:
                 variations = [title_item]
                 # Also try simplified name variations by splitting on colon or dash
@@ -1839,7 +1894,12 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                         part0 = title_item.split(sep)[0].strip()
                         if len(part0) >= 3 and part0 not in variations:
                             variations.append(part0)
+                # Determine the season from the full title_item so that
+                # simplified variations (which may lose the season marker)
+                # still get matched against the correct season.
+                item_season = extract_season_number(title_item) or 1
                 for v in variations:
+                    query_seasons[v] = item_season
                     if type_param == 'kai':
                         # Search for specific terms first to avoid generic name flooding
                         search_queries.append((v, f"{v} Fan-Kai"))
@@ -1861,6 +1921,11 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                         except ValueError:
                             ep_str = episode
                         search_queries.append((v, f"{v} {ep_str} VOSTFR"))
+                        # Also search for a season pack (e.g. "S02 VOSTFR"), since
+                        # some seasons are only released as a single pack without
+                        # per-episode numbering in the title (e.g. "Enen no
+                        # Shouboutai - Ni no Shou - S02 - VOSTFR").
+                        search_queries.append((v, f"{v} S{item_season:02d} VOSTFR"))
                     else:
                         search_queries.append((v, f"{v} VOSTFR"))
                 
@@ -1925,7 +1990,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                                 continue
                             
                         # Word boundary filter to prevent incorrect matches (e.g. Kaijin vs Kaiji)
-                        if type_param != 'manual' and not check_title_match(v, title):
+                        if type_param != 'manual' and not check_title_match(v, title, query_season=query_seasons.get(v)):
                             continue
 
                         # If a specific episode was requested, reject titles for a
@@ -1955,13 +2020,16 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             seen_links = {r['torrent_url'] for r in results if r.get('torrent_url')}
             all_variations = []
             for title_item in input_titles:
+                item_season = extract_season_number(title_item) or 1
                 if title_item not in all_variations:
                     all_variations.append(title_item)
+                    query_seasons[title_item] = item_season
                 for sep in [':', '-']:
                     if sep in title_item:
                         part0 = title_item.split(sep)[0].strip()
                         if len(part0) >= 3 and part0 not in all_variations:
                             all_variations.append(part0)
+                            query_seasons[part0] = item_season
 
             for av_item in fetch_animevost_feed():
                 av_title = av_item['title']
@@ -1980,7 +2048,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
 
                 # The animevost feed isn't query-filtered (always the latest uploads), so always
                 # match the title against the requested anime, even for manual search.
-                if not any(check_title_match(v, av_title) for v in all_variations):
+                if not any(check_title_match(v, av_title, query_season=query_seasons.get(v)) for v in all_variations):
                     continue
 
                 if ep_int is not None and not episode_matches(av_title, ep_int):
