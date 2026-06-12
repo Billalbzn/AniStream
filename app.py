@@ -187,6 +187,28 @@ def check_title_match(v, title):
 
     return False
 
+def episode_matches(title, ep_int):
+    """Checks if a torrent title corresponds to the requested episode number.
+
+    Returns True for batch/pack releases (e.g. "01-12", "Batch", "Complete")
+    since those legitimately contain the requested episode. Otherwise compares
+    the episode number parsed from the title against ep_int, allowing the
+    result through if no episode number could be parsed at all (ambiguous).
+    """
+    title_lower = title.lower()
+
+    # Batch/pack releases cover multiple episodes, including the requested one
+    if re.search(r'\b\d{1,3}\s*-\s*\d{1,3}\b', title_lower):
+        return True
+    if any(kw in title_lower for kw in ["batch", "complete", "intégrale", "integrale", "saison complète", "season complete"]):
+        return True
+
+    parsed_ep = parse_episode_number(title)
+    if parsed_ep is None:
+        return True
+
+    return parsed_ep == ep_int
+
 def is_french_subbed(title_lower, is_kai=False):
     """Checks if a torrent title is subbed in French (VOSTFR, STFR, Sub FR, etc.)."""
     # Standard French sub indicators
@@ -1752,6 +1774,14 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                     self.wfile.write(json.dumps([]).encode('utf-8'))
                     return
 
+            # Parse the requested episode number (if any) for precise filtering
+            ep_int = None
+            if episode and type_param not in ('manual', 'kai'):
+                try:
+                    ep_int = int(episode)
+                except ValueError:
+                    ep_int = None
+
             # Split by | to handle multiple title variations
             input_titles = [t.strip() for t in query_text.split('|') if t.strip()]
             
@@ -1853,7 +1883,12 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                         # Word boundary filter to prevent incorrect matches (e.g. Kaijin vs Kaiji)
                         if type_param != 'manual' and not check_title_match(v, title):
                             continue
-                            
+
+                        # If a specific episode was requested, reject titles for a
+                        # different episode/season (e.g. "episode 1" matching "season 4")
+                        if ep_int is not None and not episode_matches(title, ep_int):
+                            continue
+
                         seen_magnets.add(magnet)
                         results.append({
                             "title": title,
@@ -1902,6 +1937,9 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                 # The animevost feed isn't query-filtered (always the latest uploads), so always
                 # match the title against the requested anime, even for manual search.
                 if not any(check_title_match(v, av_title) for v in all_variations):
+                    continue
+
+                if ep_int is not None and not episode_matches(av_title, ep_int):
                     continue
 
                 seen_links.add(av_link)

@@ -1454,8 +1454,6 @@
                     
                     <!-- Quick Actions -->
                     <div id="download-quick-actions" style="display: flex; gap: 12px; margin-bottom: 15px; flex-wrap: wrap;">
-                        <button id="btn-download-first-5" class="btn-suggest watching" style="padding: 10px 16px; margin: 0; font-size: 0.9rem;" onclick="downloadBatchEpisodes(1, 5)">📥 Installer les 5 premiers épisodes</button>
-                        <button id="btn-download-next-pack" class="btn-suggest plan" style="display: none; padding: 10px 16px; margin: 0; font-size: 0.9rem;" onclick="downloadNextEpisodesPack()">📥 Installer les épisodes suivants</button>
                         <button id="btn-download-kai" class="btn-suggest plan" style="padding: 10px 16px; margin: 0; font-size: 0.9rem; background: rgba(100,180,255,0.15); border: 1px solid rgba(100,180,255,0.35); color: #7ec8ff;" onclick="downloadKaiVersion()">🎬 Version Kaï</button>
                     </div>
 
@@ -3027,19 +3025,6 @@
             if (!isSuggestion && item) {
                 // Show clean watched button if we watched at least 1 episode AND we have files in local library
                 document.getElementById('btn-clean-watched').style.display = (item.watched_episodes > 0 && item.total_files > 0) ? 'inline-block' : 'none';
-                
-                // Determine the next episode to download
-                const maxEpPresent = (item.files && item.files.length > 0) ? Math.max(...item.files.map(f => typeof f.episode_number === 'number' ? f.episode_number : 0)) : 0;
-                const nextStart = Math.max(maxEpPresent, item.watched_episodes) + 1;
-                
-                if (nextStart > 1) {
-                    document.getElementById('btn-download-first-5').style.display = 'none';
-                    document.getElementById('btn-download-next-pack').style.display = 'inline-block';
-                    document.getElementById('btn-download-next-pack').innerText = `📥 Installer les épisodes suivants (${nextStart} à ${nextStart + 4})`;
-                } else {
-                    document.getElementById('btn-download-first-5').style.display = 'inline-block';
-                    document.getElementById('btn-download-next-pack').style.display = 'none';
-                }
 
                 // Show play button
                 const modalPlayBtn = document.getElementById('modal-play-btn');
@@ -3121,11 +3106,9 @@
                                    searchResultsData.find(i => i.mal_id === currentMalId) ||
                                    { title: name, mal_id: currentMalId };
                 document.getElementById('modal-suggestion-actions').style.display = 'flex';
-                
-                // Hide pack download and clean buttons since it's just a suggestion (not in library)
+
+                // Hide clean button since it's just a suggestion (not in library)
                 document.getElementById('btn-clean-watched').style.display = 'none';
-                document.getElementById('btn-download-first-5').style.display = 'inline-block';
-                document.getElementById('btn-download-next-pack').style.display = 'none';
             }
         }
 
@@ -3790,124 +3773,6 @@
             }
         }
 
-        async function downloadBatchEpisodes(startEp, endEp) {
-            let queryText = '';
-            if (activeDetailedData && activeDetailedData.title) {
-                const titles = [];
-                if (activeDetailedData.title.romaji) titles.push(activeDetailedData.title.romaji);
-                if (activeDetailedData.title.english) titles.push(activeDetailedData.title.english);
-                queryText = titles.join('|');
-            } else {
-                queryText = activeSuggestion ? activeSuggestion.title : (activeLibraryItem ? activeLibraryItem.folder_name : "");
-            }
-            if (!queryText) return;
-
-            alertToast(`🔍 Recherche automatique des épisodes ${startEp} à ${endEp}...`);
-
-            const animeTitle = activeDetailedData ? (activeDetailedData.title.english || activeDetailedData.title.romaji) : (activeSuggestion ? activeSuggestion.title : (activeLibraryItem ? activeLibraryItem.folder_name : ""));
-
-            const batchTorrents = [];
-            for (let ep = startEp; ep <= endEp; ep++) {
-                try {
-                    alertToast(`🔍 Recherche de l'épisode ${ep}/${endEp}...`);
-                    const res = await fetch(`/api/torrent/search?query=${encodeURIComponent(queryText)}&episode=${ep}`);
-                    const torrents = await res.json();
-                    
-                    if (torrents && torrents.length > 0) {
-                        const bestTorrent = torrents[0];
-                        batchTorrents.push({
-                            magnet: bestTorrent.magnet,
-                            torrent_url: bestTorrent.torrent_url,
-                            episode: ep
-                        });
-                        console.log(`Found torrent for episode ${ep}:`, bestTorrent.title);
-                    } else {
-                        console.warn(`No torrent found for episode ${ep}`);
-                    }
-                    await new Promise(r => setTimeout(r, 600));
-                } catch (e) {
-                    console.error(`Error searching episode ${ep}:`, e);
-                }
-            }
-
-            if (batchTorrents.length === 0) {
-                // Fallback: search for a complete season/batch pack of the anime
-                alertToast(`📦 Aucun épisode individuel trouvé. Recherche du pack complet...`);
-                try {
-                    const res = await fetch(`/api/torrent/search?query=${encodeURIComponent(queryText)}`);
-                    const torrents = await res.json();
-                    if (torrents && torrents.length > 0) {
-                        const bestTorrent = torrents[0];
-                        alertToast(`📦 Pack complet trouvé : "${bestTorrent.title}". Envoi au client...`);
-                        
-                        const dlRes = await fetch('/api/torrent/download_batch', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                torrents: [{
-                                    magnet: bestTorrent.magnet,
-                                    torrent_url: bestTorrent.torrent_url,
-                                    episode: "Pack"
-                                }],
-                                anime_title: animeTitle,
-                                start_ep: startEp,
-                                end_ep: endEp
-                            })
-                        });
-                        const dlResult = await dlRes.json();
-                        if (dlResult.success) {
-                            alertToast(`🎉 ✅ Pack complet ajouté à qBittorrent.`);
-                            setTimeout(loadDashboard, 3000);
-                            return;
-                        }
-                    }
-                } catch (fallbackErr) {
-                    console.error("Fallback search failed:", fallbackErr);
-                }
-                
-                alertToast(`❌ Aucun épisode ni pack complet n'a pu être trouvé.`);
-                return;
-            }
-
-            alertToast(`📥 Envoi de ${batchTorrents.length} torrent(s) au client...`);
-            try {
-                const dlRes = await fetch('/api/torrent/download_batch', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        torrents: batchTorrents,
-                        anime_title: animeTitle,
-                        start_ep: startEp,
-                        end_ep: endEp
-                    })
-                });
-                const dlResult = await dlRes.json();
-                if (dlResult.success) {
-                    if (dlResult.method === 'qbittorrent') {
-                        alertToast(`🎉 ✅ ${batchTorrents.length} torrents ajoutés à qBittorrent dans : ${dlResult.path}`);
-                    } else if (dlResult.method === 'qbittorrent_cli') {
-                        alertToast(`🎉 ✅ Client qBittorrent lancé avec ${batchTorrents.length} torrents.`);
-                    } else {
-                        alertToast(`🎉 ✅ ${batchTorrents.length} torrents lancés.`);
-                    }
-                    setTimeout(loadDashboard, 3000);
-                } else {
-                    alertToast(`❌ Échec de l'envoi du lot de torrents.`);
-                }
-            } catch (e) {
-                console.error("Batch torrent download failed:", e);
-                alertToast("❌ Erreur de communication avec le serveur.");
-            }
-        }
-
-        function downloadNextEpisodesPack() {
-            if (!activeLibraryItem) return;
-            const maxEpPresent = (activeLibraryItem.files && activeLibraryItem.files.length > 0) ? Math.max(...activeLibraryItem.files.map(f => typeof f.episode_number === 'number' ? f.episode_number : 0)) : 0;
-            const nextStart = Math.max(maxEpPresent, activeLibraryItem.watched_episodes) + 1;
-            const nextEnd = nextStart + 4;
-            downloadBatchEpisodes(nextStart, nextEnd);
-        }
-
         async function downloadKaiVersion() {
             let queryText = '';
             if (activeDetailedData && activeDetailedData.title) {
@@ -3954,11 +3819,7 @@
                         return;
                     }
                 } else {
-                    // Fallback to normal episodes/pack
-                    alertToast(`ℹ️ Aucune version Kaï trouvée. Recherche de la version normale...`);
-                    const maxEpPresent = (activeLibraryItem && activeLibraryItem.files && activeLibraryItem.files.length > 0) ? Math.max(...activeLibraryItem.files.map(f => typeof f.episode_number === 'number' ? f.episode_number : 0)) : 0;
-                    const nextStart = activeLibraryItem ? Math.max(maxEpPresent, activeLibraryItem.watched_episodes) + 1 : 1;
-                    downloadBatchEpisodes(nextStart, nextStart + 4);
+                    alertToast(`ℹ️ Aucune version Kaï trouvée.`);
                 }
             } catch (err) {
                 console.error("Kaï download failed:", err);
