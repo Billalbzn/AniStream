@@ -19,6 +19,10 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
+# Keywords indicating a "Kai"/"Henshu" recap/recompilation release, whose episode
+# numbering does not correspond 1:1 to the original series tracked on AniList.
+KAI_KEYWORDS = ['kai', 'kaï', 'henshu', 'henshū', 'fan-kai', 'fan-kaï']
+
 PORT = 8000
 VLC_HTTP_PORT = 4212
 XML_PATH = 'myanimelist.xml'
@@ -1467,7 +1471,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                         # If type=kai is requested, enforce that the title contains Kai keywords
                         if type_param == 'kai':
                             title_lower = title.lower()
-                            if not any(kw in title_lower for kw in ['kai', 'kaï', 'henshu', 'henshū', 'fan-kai', 'fan-kaï']):
+                            if not any(kw in title_lower for kw in KAI_KEYWORDS):
                                 continue
                             
                         # Word boundary filter to prevent incorrect matches (e.g. Kaijin vs Kaiji)
@@ -1516,7 +1520,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
 
                 if type_param == 'kai':
                     av_title_lower = av_title.lower()
-                    if not any(kw in av_title_lower for kw in ['kai', 'kaï', 'henshu', 'henshū', 'fan-kai', 'fan-kaï']):
+                    if not any(kw in av_title_lower for kw in KAI_KEYWORDS):
                         continue
 
                 # The animevost feed isn't query-filtered (always the latest uploads), so always
@@ -2428,6 +2432,14 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                                         videos_for_mal.append(os.path.join(root, f))
                             folder_mappings = config_for_mal.get("folder_mappings", {})
                             mal_id, _ = resolve_mal_id_for_folder(folder_name, videos_for_mal, folder_mappings)
+
+                            # "Kai"/"Henshu" recaps have different episode numbering than the
+                            # original series tracked on AniList - don't auto-sync these, as the
+                            # episode count would not correspond to real story progress.
+                            combined_text = (folder_name + " " + os.path.basename(file_path)).lower()
+                            if any(kw in combined_text for kw in KAI_KEYWORDS):
+                                print(f"[Launcher] '{folder_name}' looks like a Kai/Henshu recap - skipping AniList auto-sync.")
+                                mal_id = None
                         except Exception as e:
                             print(f"[Launcher] Could not resolve mal_id for AniList sync: {e}")
 
