@@ -2001,6 +2001,52 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             results.sort(key=lambda x: x['seeders'], reverse=True)
             self.wfile.write(json.dumps(results).encode('utf-8'))
             
+        elif url.path == '/api/anilist/watching':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+
+            config = load_config()
+            token = config.get("anilist_token")
+            username = None
+            if token:
+                username = config.get("anilist_username")
+                if not username:
+                    username = fetch_anilist_viewer_username(token)
+                    if username:
+                        config["anilist_username"] = username
+                        save_config(config)
+
+            if not username:
+                username = "AvocadoDeska"
+
+            watching = []
+            data = fetch_anilist_progress_cached(username)
+            if data:
+                try:
+                    lists = data.get('data', {}).get('MediaListCollection', {}).get('lists', [])
+                    for lst in lists:
+                        for entry in lst.get('entries', []):
+                            if entry.get('status') != 'CURRENT':
+                                continue
+                            media = entry.get('media', {})
+                            mal_id = media.get('idMal')
+                            title = media.get('title', {}).get('romaji') or media.get('title', {}).get('english')
+                            if not mal_id or not title:
+                                continue
+                            cover = (media.get('coverImage') or {}).get('large') or (media.get('coverImage') or {}).get('medium') or ''
+                            watching.append({
+                                "title": title,
+                                "mal_id": int(mal_id),
+                                "cover_image": cover,
+                                "progress": entry.get('progress', 0),
+                                "episodes": media.get('episodes')
+                            })
+                except Exception as e:
+                    print(f"[API] Error parsing AniList watching list: {e}")
+
+            self.wfile.write(json.dumps(watching).encode('utf-8'))
+
         elif url.path == '/api/suggestions':
             self.send_response(200)
             self.send_header('Content-type', 'application/json')

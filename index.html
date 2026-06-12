@@ -1280,10 +1280,16 @@
             </div>
         </div>
 
-        <!-- ROW: EN COURS (simplified list, click to open + install missing episodes) -->
+        <!-- ROW: EN COURS (AniList "watching" list, click to open + install missing episodes) -->
         <div id="section-watching-list" class="row" style="display: none;">
-            <h2 class="row-title">▶️ En cours de lecture</h2>
-            <div id="watching-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+            <h2 class="row-title">▶️ En cours de lecture (AniList)</h2>
+            <div class="row-container">
+                <button class="slider-btn left-btn" onclick="scrollRow(this, -1)">‹</button>
+                <div id="row-watching" class="row-posters">
+                    <!-- Populated by JS -->
+                </div>
+                <button class="slider-btn right-btn" onclick="scrollRow(this, 1)">›</button>
+            </div>
         </div>
 
         <!-- ROW 2: ALL LOCAL LIBRARY (MA BIBLIOTHÈQUE) -->
@@ -2103,6 +2109,7 @@
             }
             await loadLibrary();
             loadSuggestions();   // don't await — runs in parallel
+            loadWatchingList();  // don't await — runs in parallel
             loadAgenda();        // don't await — runs in parallel
             loadPlanning();      // don't await — runs in parallel
         }
@@ -2221,11 +2228,6 @@
                 rowContinue.innerHTML = '';
                 let hasContinue = false;
 
-                const watchingList = document.getElementById('watching-list');
-                const sectionWatchingList = document.getElementById('section-watching-list');
-                watchingList.innerHTML = '';
-                let hasWatching = false;
-
                 // Render poster cards
                 for (const item of libraryData) {
                     renderPosterCard(item, rowLibrary, false);
@@ -2237,12 +2239,8 @@
                     if (hasActiveProgress || isWatchingOnAnilist) {
                         renderPosterCard(item, rowContinue, true);
                         hasContinue = true;
-                        renderWatchingRow(item, watchingList);
-                        hasWatching = true;
                     }
                 }
-
-                sectionWatchingList.style.display = hasWatching ? 'block' : 'none';
 
                 sectionContinue.style.display = hasContinue ? 'block' : 'none';
 
@@ -2881,47 +2879,96 @@
             }
         }
 
-        function renderWatchingRow(item, container) {
-            const row = document.createElement('div');
-            row.style = 'display: flex; align-items: center; justify-content: space-between; gap: 12px; background: rgba(255,255,255,0.04); border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: background 0.2s;';
-            row.onmouseenter = () => row.style.background = 'rgba(255,255,255,0.08)';
-            row.onmouseleave = () => row.style.background = 'rgba(255,255,255,0.04)';
+        async function loadWatchingList() {
+            const rowWatching = document.getElementById('row-watching');
+            const sectionWatchingList = document.getElementById('section-watching-list');
+            try {
+                const res = await fetch('/api/anilist/watching');
+                const watching = await res.json();
 
-            const activeFile = item.files.find(f => f.progress_time > 10 && f.progress_percent < 95);
-            let progressText;
-            if (activeFile) {
-                const epIndex = item.files.indexOf(activeFile) + 1;
-                const remainingMin = Math.round((activeFile.progress_length - activeFile.progress_time) / 60);
-                progressText = `Ép. ${epIndex} • Reste ${remainingMin} min`;
-            } else {
-                progressText = `Épisode suivant : ${item.watched_episodes + 1}`;
+                rowWatching.innerHTML = '';
+                if (!watching || watching.length === 0) {
+                    sectionWatchingList.style.display = 'none';
+                    return;
+                }
+
+                sectionWatchingList.style.display = 'block';
+                for (const entry of watching) {
+                    renderWatchingCard(entry, rowWatching);
+                }
+            } catch (err) {
+                console.error("Failed to load AniList watching list", err);
+                sectionWatchingList.style.display = 'none';
             }
-
-            row.innerHTML = `
-                <div style="display: flex; flex-direction: column; min-width: 0;">
-                    <span style="color: #fff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.folder_name}</span>
-                    <span style="font-size: 0.85rem; color: var(--text-muted);">${progressText}</span>
-                </div>
-                <button class="btn-suggest watching" style="padding: 8px 14px; margin: 0; font-size: 0.85rem; flex-shrink: 0;">📥 Installer ce qu'il manque</button>
-            `;
-
-            row.onclick = () => showAnimeModal(item.folder_name, false);
-            row.querySelector('button').onclick = (e) => {
-                e.stopPropagation();
-                downloadMissingEpisodesForItem(item);
-            };
-
-            container.appendChild(row);
         }
 
-        async function downloadMissingEpisodesForItem(item) {
-            alertToast(`🔍 Recherche des informations sur "${item.folder_name}"...`);
-            const data = await fetchAniListDetails(item.mal_id, item.folder_name);
-            if (!data || !data.episodes) {
-                alertToast(`❌ Impossible de déterminer le nombre total d'épisodes pour "${item.folder_name}".`);
+        async function renderWatchingCard(entry, container) {
+            const card = document.createElement('div');
+            card.className = 'poster-card loading';
+
+            const libItem = libraryData.find(i => i.mal_id === entry.mal_id);
+            card.onclick = () => showAnimeModal(libItem ? libItem.folder_name : entry.title, !libItem, entry.mal_id);
+
+            const mockItem = {
+                folder_name: entry.title,
+                title: entry.title,
+                mal_id: entry.mal_id,
+                total_files: 0,
+                watched_episodes: 0,
+                next_episode_name: '',
+                next_episode_path: null,
+                files: []
+            };
+            card.onmouseenter = () => hoverHero(mockItem);
+            card.onmouseleave = () => leaveHero();
+
+            const badgeHtml = `<div class="card-badge card-badge-muted">Ép. ${entry.progress}${entry.episodes ? ' / ' + entry.episodes : ''}</div>`;
+
+            card.innerHTML = `
+                ${badgeHtml}
+                <div class="card-title-fallback">${entry.title}</div>
+                <button class="btn-suggest watching" style="position: absolute; bottom: 10px; left: 10px; right: 10px; padding: 8px; margin: 0; font-size: 0.8rem; z-index: 5;" onclick="event.stopPropagation(); downloadMissingEpisodesFromAnilist(${JSON.stringify(entry).replace(/"/g, '&quot;')})">📥 Installer ce qu'il manque</button>
+            `;
+            container.appendChild(card);
+
+            const posterUrl = entry.cover_image || await getPosterUrl(entry.mal_id, entry.title);
+            if (posterUrl) {
+                const img = new Image();
+                img.onload = () => {
+                    card.classList.remove('loading');
+                    card.innerHTML = `<img src="${posterUrl}" alt="Poster">` + card.innerHTML;
+                };
+                img.src = posterUrl;
+            } else {
+                card.classList.remove('loading');
+            }
+        }
+
+        async function downloadMissingEpisodesFromAnilist(entry) {
+            if (!entry.episodes) {
+                alertToast(`❌ Le nombre total d'épisodes de "${entry.title}" est inconnu sur AniList.`);
                 return;
             }
-            await downloadRemainingEpisodes(item, data);
+            if (entry.progress >= entry.episodes) {
+                alertToast(`✅ "${entry.title}" est déjà complet sur AniList.`);
+                return;
+            }
+
+            const libItem = libraryData.find(i => i.mal_id === entry.mal_id);
+            const pseudoLibraryItem = {
+                folder_name: entry.title,
+                watched_episodes: entry.progress,
+                files: libItem ? libItem.files : []
+            };
+            const detailedData = await fetchAniListDetails(entry.mal_id, entry.title);
+            if (!detailedData) {
+                alertToast(`❌ Impossible de récupérer les détails de "${entry.title}".`);
+                return;
+            }
+            // Force the AniList "watching" progress as the starting point, ignoring
+            // any local files, since this list is driven by AniList progress.
+            detailedData.episodes = entry.episodes;
+            await downloadRemainingEpisodes(pseudoLibraryItem, detailedData);
         }
 
         async function renderPosterCard(item, container, isContinueRow) {
