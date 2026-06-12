@@ -12,6 +12,7 @@ import threading
 import time
 import re
 import http.cookiejar
+from datetime import datetime, timezone
 
 # Avoid UnicodeEncodeError crashes when printing file paths containing accented
 # characters (e.g. "Henshū") on Windows consoles using cp1252.
@@ -30,9 +31,13 @@ CONFIG_PATH = 'config.json'
 RECOMMENDATIONS_CACHE_PATH = 'recommendations_cache.json'
 ANIMEVOST_RSS_URL = 'https://tsundere.animevost.fr/rss/nyaa'
 ANIMEVOST_CACHE_TTL = 600  # 10 minutes
+TRAKT_API_URL = 'https://api.trakt.tv'
 
 _animevost_cache = None
 _animevost_cache_time = 0
+
+# In-memory cache of Trakt movie search results, keyed by (title.lower(), year)
+_trakt_movie_cache = {}
 
 vlc_status_data = {
     "file_path": None,
@@ -44,7 +49,12 @@ vlc_status_data = {
     "mal_id": None,
     "episode_number": None,
     "anilist_status": None,
-    "anilist_synced": False
+    "anilist_synced": False,
+    "is_movie": False,
+    "movie_title": None,
+    "movie_trakt_id": None,
+    "movie_rating_prompt": False,
+    "movie_rated": False
 }
 
 # Episode is considered "watched" for AniList sync once playback reaches this percent
@@ -355,6 +365,13 @@ def poll_vlc_status():
                                     args=(token, vlc_status_data["mal_id"], vlc_status_data["episode_number"]),
                                     daemon=True
                                 ).start()
+
+                        # Trigger the rating popup once a movie is mostly done
+                        if (percent >= ANILIST_SYNC_THRESHOLD
+                                and vlc_status_data.get("is_movie")
+                                and not vlc_status_data.get("movie_rated")
+                                and not vlc_status_data.get("movie_rating_prompt")):
+                            vlc_status_data["movie_rating_prompt"] = True
                 else:
                     # VLC reports stopped - force save the last known position
                     if vlc_status_data.get("state") in ["playing", "paused"] and vlc_status_data.get("file_path"):
@@ -1190,6 +1207,95 @@ def guess_title_from_filenames(videos):
                 return title_part
     return None
 
+def guess_movie_title_from_filename(filename):
+    """Extracts a clean movie title (and optional release year) from a filename,
+    e.g. 'Movie.Name.2018.VOSTFR.1080p.BluRay.x264-GROUP.mkv' -> ('Movie Name', 2018)."""
+    name, _ = os.path.splitext(filename)
+    name = re.sub(r'\[[^\]]*\]', ' ', name)
+    name = re.sub(r'\([^\)]*\)', ' ', name)
+
+    # A 4-digit year is the most reliable cut point between title and release info
+    year_match = re.search(r'\b(19[0-9]{2}|20[0-9]{2})\b', name)
+    year = None
+    if year_match:
+        year = int(year_match.group(1))
+        name = name[:year_match.start()]
+    else:
+        # No year found - cut at the first known quality/source/lang tag
+        cut_match = re.search(
+            r'\b(1080p|720p|2160p|4k|bluray|brrip|webrip|web[\-.]?dl|hdtv|dvdrip|'
+            r'x264|x265|hevc|vostfr|vosta|multi|french|truefrench)\b',
+            name, re.IGNORECASE
+        )
+        if cut_match:
+            name = name[:cut_match.start()]
+
+    name = re.sub(r'[._]', ' ', name)
+    name = re.sub(r'\s+', ' ', name).strip(' -_')
+    return (name, year) if name else (None, None)
+
+def fetch_trakt_movie(title, client_id, year=None):
+    """Searches Trakt.tv for a movie matching the given title (and optional year),
+    returning the raw 'movie' object (with ids/title/year) or None. Cached in memory."""
+    if not title or not client_id:
+        return None
+
+    cache_key = (title.lower(), year)
+    if cache_key in _trakt_movie_cache:
+        return _trakt_movie_cache[cache_key]
+
+    url = f'{TRAKT_API_URL}/search/movie?query={urllib.parse.quote(title)}'
+    if year:
+        url += f'&years={year}'
+
+    req = urllib.request.Request(url, headers={
+        'Content-Type': 'application/json',
+        'trakt-api-version': '2',
+        'trakt-api-key': client_id,
+        'User-Agent': 'Mozilla/5.0'
+    })
+    result = None
+    try:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            results = json.loads(response.read().decode('utf-8'))
+            if results:
+                result = results[0].get('movie')
+    except Exception as e:
+        print(f"[Trakt] Error searching for movie '{title}': {e}")
+
+    _trakt_movie_cache[cache_key] = result
+    return result
+
+def rate_movie_on_trakt(client_id, access_token, trakt_id, rating):
+    """Sends a rating (1-10) and marks a movie as watched 'now' on Trakt.tv."""
+    headers = {
+        'Content-Type': 'application/json',
+        'trakt-api-version': '2',
+        'trakt-api-key': client_id,
+        'Authorization': f'Bearer {access_token}',
+        'User-Agent': 'Mozilla/5.0'
+    }
+    watched_at = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    requests_to_send = [
+        (f'{TRAKT_API_URL}/sync/ratings', {"movies": [{"ids": {"trakt": int(trakt_id)}, "rating": int(rating)}]}),
+        (f'{TRAKT_API_URL}/sync/history', {"movies": [{"ids": {"trakt": int(trakt_id)}, "watched_at": watched_at}]}),
+    ]
+    success = True
+    for url, payload in requests_to_send:
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                response.read()
+        except Exception as e:
+            print(f"[Trakt] Error posting to {url}: {e}")
+            success = False
+    return success
+
 def resolve_mal_id_for_folder(folder_name, videos, folder_mappings):
     """Resolves a (mal_id, matched_title) pair for an anime folder, using explicit
     folder_mappings first, then guessing from filenames/folder name against SUGGESTIONS."""
@@ -1761,6 +1867,40 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                 
             self.wfile.write(json.dumps(res).encode('utf-8'))
             
+        elif url.path == '/api/movies/library':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+
+            config = load_config()
+            movies_dir = config.get("movies_dir", r"C:\Films")
+            trakt_client_id = config.get("trakt_client_id")
+
+            if not os.path.exists(movies_dir):
+                res = {"success": False, "movies_dir": movies_dir, "error": "directory_not_found"}
+            else:
+                try:
+                    movies = []
+                    for f in os.listdir(movies_dir):
+                        full_path = os.path.join(movies_dir, f)
+                        if os.path.isfile(full_path) and f.lower().endswith(('.mkv', '.mp4', '.avi', '.mov')):
+                            guessed_title, guessed_year = guess_movie_title_from_filename(f)
+                            trakt_movie = fetch_trakt_movie(guessed_title, trakt_client_id, guessed_year)
+                            movie_entry = {
+                                "file_name": f,
+                                "file_path": full_path,
+                                "title": trakt_movie.get("title") if trakt_movie else guessed_title,
+                                "year": trakt_movie.get("year") if trakt_movie else guessed_year,
+                                "trakt_id": trakt_movie.get("ids", {}).get("trakt") if trakt_movie else None,
+                            }
+                            movies.append(movie_entry)
+                    res = {"success": True, "movies_dir": movies_dir, "movies": movies}
+                except Exception as e:
+                    print(f"[API] Error scanning movies library: {e}")
+                    res = {"success": False, "movies_dir": movies_dir, "error": str(e)}
+
+            self.wfile.write(json.dumps(res).encode('utf-8'))
+
         elif url.path == '/api/launcher/config':
             # GET current config
             self.send_response(200)
@@ -2477,6 +2617,30 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"success": True, "deleted_count": deleted_count, "deleted_files": deleted_files}).encode('utf-8'))
                 
+        elif url.path == '/api/movies/rate':
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            params = json.loads(post_data.decode('utf-8'))
+
+            rating = params.get('rating')
+            trakt_id = vlc_status_data.get("movie_trakt_id")
+
+            config = load_config()
+            client_id = config.get("trakt_client_id")
+            access_token = config.get("trakt_access_token")
+
+            success = False
+            if rating and trakt_id and client_id and access_token:
+                success = rate_movie_on_trakt(client_id, access_token, trakt_id, rating)
+
+            vlc_status_data["movie_rating_prompt"] = False
+            vlc_status_data["movie_rated"] = True
+
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"success": success}).encode('utf-8'))
+
         elif url.path == '/api/launcher/play':
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
@@ -2508,24 +2672,56 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                         vlc_status_data["remaining"] = 0
                         vlc_status_data["percent"] = 0
 
-                        # Resolve mal_id/episode number for automatic AniList progress sync
-                        update_anilist_sync_status_for_file(file_path)
-
-                        # Build playlist of subsequent episodes in the same folder
-                        parent_dir = os.path.dirname(file_path)
-                        playlist = []
-                        if os.path.exists(parent_dir):
-                            for f in os.listdir(parent_dir):
-                                if f.lower().endswith(('.mkv', '.mp4', '.avi', '.mov')):
-                                    playlist.append(os.path.normpath(os.path.join(parent_dir, f)))
-                            playlist.sort()
-                        
+                        # Determine if this file lives under the configured movies directory
+                        config_for_movies = load_config()
+                        movies_dir = config_for_movies.get("movies_dir", r"C:\Films")
+                        is_movie = False
                         try:
-                            normalized_file_path = os.path.normpath(file_path)
-                            current_idx = playlist.index(normalized_file_path)
-                            subsequent_files = playlist[current_idx:]
+                            is_movie = os.path.commonpath([os.path.normpath(file_path), os.path.normpath(movies_dir)]) == os.path.normpath(movies_dir)
                         except ValueError:
+                            is_movie = False
+
+                        vlc_status_data["is_movie"] = is_movie
+                        vlc_status_data["movie_rating_prompt"] = False
+                        vlc_status_data["movie_rated"] = False
+
+                        if is_movie:
+                            vlc_status_data["mal_id"] = None
+                            vlc_status_data["episode_number"] = None
+                            vlc_status_data["anilist_synced"] = True
+
+                            guessed_title, guessed_year = guess_movie_title_from_filename(os.path.basename(file_path))
+                            trakt_movie = fetch_trakt_movie(guessed_title, config_for_movies.get("trakt_client_id"), guessed_year)
+                            if trakt_movie:
+                                vlc_status_data["movie_title"] = trakt_movie.get("title")
+                                vlc_status_data["movie_trakt_id"] = trakt_movie.get("ids", {}).get("trakt")
+                            else:
+                                vlc_status_data["movie_title"] = guessed_title
+                                vlc_status_data["movie_trakt_id"] = None
+
                             subsequent_files = [file_path]
+                        else:
+                            vlc_status_data["movie_title"] = None
+                            vlc_status_data["movie_trakt_id"] = None
+
+                            # Resolve mal_id/episode number for automatic AniList progress sync
+                            update_anilist_sync_status_for_file(file_path)
+
+                            # Build playlist of subsequent episodes in the same folder
+                            parent_dir = os.path.dirname(file_path)
+                            playlist = []
+                            if os.path.exists(parent_dir):
+                                for f in os.listdir(parent_dir):
+                                    if f.lower().endswith(('.mkv', '.mp4', '.avi', '.mov')):
+                                        playlist.append(os.path.normpath(os.path.join(parent_dir, f)))
+                                playlist.sort()
+
+                            try:
+                                normalized_file_path = os.path.normpath(file_path)
+                                current_idx = playlist.index(normalized_file_path)
+                                subsequent_files = playlist[current_idx:]
+                            except ValueError:
+                                subsequent_files = [file_path]
 
                         cmd = [vlc_path, "--extraintf=http", f"--http-port={VLC_HTTP_PORT}", "--http-password=avocado"]
                         
@@ -2596,7 +2792,13 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                 config["qbittorrent_username"] = params['qbittorrent_username']
             if 'qbittorrent_password' in params:
                 config["qbittorrent_password"] = params['qbittorrent_password']
-                
+            if 'movies_dir' in params:
+                config["movies_dir"] = params['movies_dir']
+            if 'trakt_client_id' in params:
+                config["trakt_client_id"] = params['trakt_client_id']
+            if 'trakt_access_token' in params:
+                config["trakt_access_token"] = params['trakt_access_token']
+
             success = save_config(config)
             
             self.send_response(200 if success else 500)

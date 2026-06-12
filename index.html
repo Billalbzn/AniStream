@@ -1289,6 +1289,18 @@
             </div>
         </div>
 
+        <!-- ROW 2.5: MOVIES (FILMS) -->
+        <div id="section-movies" class="row" style="display: none;">
+            <h2 class="row-title">Films</h2>
+            <div class="row-container">
+                <button class="slider-btn left-btn" onclick="scrollRow(this, -1)">‹</button>
+                <div id="row-movies" class="row-posters">
+                    <div class="loading-screen"><div class="spinner"></div></div>
+                </div>
+                <button class="slider-btn right-btn" onclick="scrollRow(this, 1)">›</button>
+            </div>
+        </div>
+
         <!-- SECTION 3: SUGGESTION BOARD -->
         <div id="section-suggest" class="row">
             <h2 class="row-title">Recommandations Personnalisées (AniList)</h2>
@@ -1415,6 +1427,12 @@
                     <input type="text" id="anime-dir-input" class="form-control" placeholder="Ex: C:\Anime">
                 </div>
 
+                <!-- Movies Folder -->
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label style="font-weight: 600; color: #fff;">Dossier local de films :</label>
+                    <input type="text" id="movies-dir-input" class="form-control" placeholder="Ex: C:\Films">
+                </div>
+
                 <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 20px 0;">
 
                 <h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 15px; color: #fff; display: flex; align-items: center; gap: 8px;">
@@ -1471,11 +1489,66 @@
                         <input type="password" id="qbittorrent-password-input" class="form-control" placeholder="Ex: adminadmin">
                     </div>
                 </div>
-                
+
+                <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 20px 0;">
+
+                <h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 15px; color: #fff; display: flex; align-items: center; gap: 8px;">
+                    🎬 Notation des films (Trakt.tv)
+                </h3>
+
+                <!-- Trakt Client ID -->
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label style="font-weight: 600; color: #fff;">1. Client ID Trakt :</label>
+                    <input type="text" id="trakt-client-id-input" class="form-control" placeholder="Entrez le Client ID de votre app Trakt">
+                    <span style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.4; margin-top: 5px;">
+                        Créez une app sur <a href="https://trakt.tv/oauth/applications" target="_blank" style="color: var(--accent-red); text-decoration: underline;">trakt.tv/oauth/applications</a>.
+                    </span>
+                </div>
+
+                <!-- Trakt Access Token -->
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label style="font-weight: 600; color: #fff;">2. Token d'accès Trakt :</label>
+                    <input type="password" id="trakt-access-token-input" class="form-control" placeholder="Collez votre token d'accès Trakt">
+                </div>
+
                 <div style="display: flex; gap: 12px; margin-top: 25px; justify-content: flex-end;">
                     <button class="btn-suggest plan" style="padding: 12px 20px;" onclick="closeConfigModal()">Annuler</button>
                     <button class="btn-suggest completed" style="padding: 12px 24px;" onclick="saveConfig()">Enregistrer</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MOVIE MODAL -->
+    <div id="movie-modal-overlay" class="modal-overlay" onclick="closeMovieModal(event)">
+        <div class="anime-modal" style="max-width: 520px;" onclick="event.stopPropagation()">
+            <button class="btn-close-modal" onclick="closeMovieModal()">×</button>
+            <div style="padding: 30px;">
+                <h2 id="movie-modal-title" class="modal-title" style="font-size: 1.8rem; font-weight: 700; margin-bottom: 5px;">Titre</h2>
+                <p id="movie-modal-year" style="color: var(--text-muted); margin-bottom: 20px;"></p>
+
+                <button id="movie-modal-play-btn" class="btn-hero btn-hero-play" style="padding: 10px 24px; font-size: 1rem; width: fit-content; gap: 8px; margin-bottom: 20px;" onclick="playActiveMovie()">► Lecture</button>
+
+                <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 20px 0;">
+
+                <h3 class="modal-section-title">📥 Télécharger (Torrents VOSTFR)</h3>
+                <div style="display: flex; gap: 10px; margin: 15px 0;">
+                    <input type="text" id="movie-torrent-search-input" class="form-control" style="flex: 1; padding: 8px 12px;" placeholder="Rechercher des torrents VOSTFR...">
+                    <button class="btn-suggest completed" style="padding: 8px 16px; margin: 0; font-size: 0.9rem;" onclick="searchMovieTorrents()">Rechercher</button>
+                </div>
+                <div id="movie-torrent-results-list" class="torrent-results-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MOVIE RATING POPUP -->
+    <div id="movie-rating-overlay" class="modal-overlay">
+        <div class="anime-modal" style="max-width: 420px;" onclick="event.stopPropagation()">
+            <div style="padding: 30px; text-align: center;">
+                <h2 style="font-size: 1.4rem; font-weight: 700; margin-bottom: 10px;">🎬 Note ce film</h2>
+                <p id="movie-rating-title" style="color: var(--text-muted); margin-bottom: 20px;"></p>
+                <div id="movie-rating-stars" style="display: flex; justify-content: center; gap: 6px; margin-bottom: 25px; flex-wrap: wrap;"></div>
+                <button class="btn-suggest skip" style="padding: 10px 20px; margin: 0;" onclick="skipMovieRating()">Plus tard</button>
             </div>
         </div>
     </div>
@@ -1486,6 +1559,7 @@
         let searchResultsData = [];
         let activeSuggestion = null;
         let activeLibraryItem = null;
+        let activeMovieItem = null;
         let activeDetailedData = null;
         let libraryCache = {};
         let translationCache = {};
@@ -1769,9 +1843,63 @@
                 } else {
                     badge.style.display = 'none';
                 }
+
+                if (status && status.movie_rating_prompt) {
+                    showMovieRatingPopup(status.movie_title);
+                }
             } catch (e) {
                 console.error("Failed to check VLC status:", e);
             }
+        }
+
+        function showMovieRatingPopup(title) {
+            const overlay = document.getElementById('movie-rating-overlay');
+            if (overlay.style.display === 'flex') return; // already shown
+            document.getElementById('movie-rating-title').innerText = title || '';
+            const stars = document.getElementById('movie-rating-stars');
+            stars.innerHTML = '';
+            for (let i = 1; i <= 10; i++) {
+                const btn = document.createElement('button');
+                btn.className = 'btn-suggest plan';
+                btn.style = 'padding: 8px 12px; margin: 0; min-width: 40px;';
+                btn.innerText = i;
+                btn.onclick = () => submitMovieRating(i);
+                stars.appendChild(btn);
+            }
+            overlay.style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeMovieRatingPopup() {
+            document.getElementById('movie-rating-overlay').style.display = 'none';
+            document.body.style.overflow = '';
+        }
+
+        async function submitMovieRating(rating) {
+            try {
+                await fetch('/api/movies/rate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rating: rating })
+                });
+                alertToast(`✅ Note envoyée sur Trakt : ${rating}/10`);
+            } catch (err) {
+                console.error("Failed to submit movie rating:", err);
+            }
+            closeMovieRatingPopup();
+        }
+
+        async function skipMovieRating() {
+            try {
+                await fetch('/api/movies/rate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rating: null })
+                });
+            } catch (err) {
+                console.error("Failed to skip movie rating:", err);
+            }
+            closeMovieRatingPopup();
         }
         // Poll VLC progress every 3 seconds
         setInterval(checkVlcStatus, 3000);
@@ -1792,6 +1920,7 @@
                 libraryCache = {};
             }
             await loadLibrary();
+            loadMovies();        // don't await — runs in parallel
             loadSuggestions();   // don't await — runs in parallel
             loadAgenda();        // don't await — runs in parallel
             loadPlanning();      // don't await — runs in parallel
@@ -1938,6 +2067,59 @@
                 console.error("Failed to load library", err);
                 rowLibrary.innerHTML = `<div class="empty-state"><h2>Erreur</h2><p>Impossible de joindre le serveur AvocadoStream.</p></div>`;
             }
+        }
+
+        async function loadMovies() {
+            const section = document.getElementById('section-movies');
+            const row = document.getElementById('row-movies');
+
+            try {
+                const res = await fetch('/api/movies/library');
+                const result = await res.json();
+
+                if (!result.success || !Array.isArray(result.movies) || result.movies.length === 0) {
+                    section.style.display = 'none';
+                    return;
+                }
+
+                section.style.display = 'block';
+                row.innerHTML = '';
+
+                for (const movie of result.movies) {
+                    const card = document.createElement('div');
+                    card.className = 'poster-card';
+                    card.innerHTML = `
+                        <div class="card-title-fallback">${movie.title}${movie.year ? ' (' + movie.year + ')' : ''}</div>
+                    `;
+                    card.onclick = () => showMovieModal(movie);
+                    row.appendChild(card);
+                }
+            } catch (err) {
+                console.error("Failed to load movies", err);
+                section.style.display = 'none';
+            }
+        }
+
+        function showMovieModal(movie) {
+            activeMovieItem = movie;
+            document.getElementById('movie-modal-title').innerText = movie.title || movie.file_name;
+            document.getElementById('movie-modal-year').innerText = movie.year || '';
+            document.getElementById('movie-torrent-search-input').value = movie.title || '';
+            document.getElementById('movie-torrent-results-list').innerHTML = '';
+            document.getElementById('movie-modal-overlay').style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeMovieModal(event) {
+            if (event && event.target.id !== 'movie-modal-overlay') return;
+            document.getElementById('movie-modal-overlay').style.display = 'none';
+            document.body.style.overflow = '';
+        }
+
+        function playActiveMovie() {
+            if (!activeMovieItem) return;
+            playEpisode(activeMovieItem.file_path);
+            closeMovieModal();
         }
 
         async function loadSuggestions() {
@@ -2887,8 +3069,11 @@
                 const res = await fetch('/api/launcher/config');
                 const config = await res.json();
                 document.getElementById('anime-dir-input').value = config.anime_dir || 'C:\\Anime';
+                document.getElementById('movies-dir-input').value = config.movies_dir || 'C:\\Films';
                 document.getElementById('anilist-client-id-input').value = config.anilist_client_id || '';
                 document.getElementById('anilist-token-input').value = config.anilist_token || '';
+                document.getElementById('trakt-client-id-input').value = config.trakt_client_id || '';
+                document.getElementById('trakt-access-token-input').value = config.trakt_access_token || '';
                 
                 // qBittorrent settings
                 const qbEnabled = config.qbittorrent_enabled || false;
@@ -2913,9 +3098,12 @@
 
         async function saveConfig() {
             const newPath = document.getElementById('anime-dir-input').value.trim();
+            const moviesPath = document.getElementById('movies-dir-input').value.trim();
             const clientId = document.getElementById('anilist-client-id-input').value.trim();
             const token = document.getElementById('anilist-token-input').value.trim();
-            
+            const traktClientId = document.getElementById('trakt-client-id-input').value.trim();
+            const traktAccessToken = document.getElementById('trakt-access-token-input').value.trim();
+
             const qbEnabled = document.getElementById('qbittorrent-enabled-input').checked;
             const qbHost = document.getElementById('qbittorrent-host-input').value.trim();
             const qbUser = document.getElementById('qbittorrent-username-input').value.trim();
@@ -2927,10 +3115,13 @@
                 const res = await fetch('/api/launcher/config', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
+                    body: JSON.stringify({
                         anime_dir: newPath,
+                        movies_dir: moviesPath,
                         anilist_client_id: clientId,
                         anilist_token: token,
+                        trakt_client_id: traktClientId,
+                        trakt_access_token: traktAccessToken,
                         qbittorrent_enabled: qbEnabled,
                         qbittorrent_host: qbHost,
                         qbittorrent_username: qbUser,
@@ -3097,8 +3288,52 @@
             }
         }
 
+        async function searchMovieTorrents() {
+            const queryInput = document.getElementById('movie-torrent-search-input');
+            const queryText = queryInput.value.trim();
+            const listContainer = document.getElementById('movie-torrent-results-list');
+
+            if (!queryText) return;
+
+            listContainer.innerHTML = '<div class="loading-screen" style="padding: 10px;"><div class="spinner" style="width: 20px; height: 20px;"></div></div>';
+
+            try {
+                const res = await fetch(`/api/torrent/search?query=${encodeURIComponent(queryText)}&type=manual`);
+                const torrents = await res.json();
+
+                listContainer.innerHTML = '';
+                if (torrents.length === 0) {
+                    listContainer.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem; font-style: italic; margin: 0;">Aucun torrent trouvé.</p>';
+                    return;
+                }
+
+                torrents.forEach(t => {
+                    const item = document.createElement('div');
+                    item.className = 'torrent-result-item';
+                    const magnetStr = (t.magnet || '').replace(/'/g, "\\'");
+                    const torrentUrlStr = (t.torrent_url || '').replace(/'/g, "\\'");
+                    const sourceLabel = t.source === 'animevost' ? 'AnimeVost' : 'Nyaa';
+                    const sourceClass = t.source === 'animevost' ? 'source-badge--animevost' : 'source-badge--nyaa';
+                    item.innerHTML = `
+                        <div class="torrent-result-info">
+                            <span class="torrent-result-title" title="${t.title}">${t.title}</span>
+                            <span class="torrent-result-meta">
+                                <span class="source-badge ${sourceClass}">${sourceLabel}</span>
+                                Taille : ${t.size} • <span style="color: #46d369;">▲ ${t.seeders}</span> • <span style="color: #e50914;">▼ ${t.leechers}</span>
+                            </span>
+                        </div>
+                        <button class="btn-suggest completed" style="padding: 6px 12px; margin: 0; font-size: 0.8rem; flex-shrink: 0;" onclick="downloadTorrent('${magnetStr}', '${torrentUrlStr}')">📥 DL</button>
+                    `;
+                    listContainer.appendChild(item);
+                });
+            } catch (err) {
+                console.error("Movie torrent search failed:", err);
+                listContainer.innerHTML = '<p style="color: #e50914; font-size: 0.9rem; margin: 0;">Erreur lors de la recherche.</p>';
+            }
+        }
+
         async function downloadTorrent(magnet, torrentUrl) {
-            const title = activeSuggestion ? activeSuggestion.title : (activeLibraryItem ? activeLibraryItem.folder_name : "");
+            const title = activeSuggestion ? activeSuggestion.title : (activeLibraryItem ? activeLibraryItem.folder_name : (activeMovieItem ? activeMovieItem.title : ""));
             if (!title) return;
             
             alertToast("Envoi du téléchargement au client torrent...");
