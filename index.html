@@ -1198,7 +1198,7 @@
             <li><a href="#" onclick="showPage('movies', event)">🎬 Films</a></li>
         </ul>
         <div class="nav-actions">
-            <div class="search-container">
+            <div class="search-container" id="navbar-search-container">
                 <input type="text" id="search-input" class="search-input" placeholder="Rechercher un anime..." onkeydown="handleSearchKey(event)">
                 <button class="btn-search" onclick="triggerSearch()">🔍</button>
             </div>
@@ -2040,6 +2040,7 @@
             const isMovies = page === 'movies';
             document.getElementById('page-anime').style.display = isMovies ? 'none' : '';
             document.getElementById('page-movies').style.display = isMovies ? '' : 'none';
+            document.getElementById('navbar-search-container').style.display = isMovies ? 'none' : '';
             if (isMovies) {
                 loadMovies();
                 loadMovieWatchlist();
