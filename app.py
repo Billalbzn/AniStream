@@ -1242,6 +1242,26 @@ def guess_movie_title_from_filename(filename):
     name = re.sub(r'\s+', ' ', name).strip(' -_')
     return (name, year) if name else (None, None)
 
+def search_trakt_movies(query, client_id, limit=15):
+    """Searches Trakt.tv for movies matching the query, returning a list of raw 'movie' objects."""
+    if not query or not client_id:
+        return []
+
+    url = f'{TRAKT_API_URL}/search/movie?query={urllib.parse.quote(query)}&limit={limit}'
+    req = urllib.request.Request(url, headers={
+        'Content-Type': 'application/json',
+        'trakt-api-version': '2',
+        'trakt-api-key': client_id,
+        'User-Agent': 'Mozilla/5.0'
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            results = json.loads(response.read().decode('utf-8'))
+            return [r.get('movie') for r in results if r.get('movie')]
+    except Exception as e:
+        print(f"[Trakt] Error searching movies for '{query}': {e}")
+        return []
+
 def fetch_trakt_movie(title, client_id, year=None):
     """Searches Trakt.tv for a movie matching the given title (and optional year),
     returning the raw 'movie' object (with ids/title/year) or None. Cached in memory."""
@@ -1991,6 +2011,36 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                 except Exception as e:
                     print(f"[API] Error scanning movies library: {e}")
                     res = {"success": False, "movies_dir": movies_dir, "error": str(e)}
+
+            self.wfile.write(json.dumps(res).encode('utf-8'))
+
+        elif url.path == '/api/movies/search':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+
+            config = load_config()
+            client_id = config.get("trakt_client_id")
+            query_params = urllib.parse.parse_qs(url.query)
+            query = query_params.get('query', [''])[0]
+
+            if not client_id:
+                res = {"success": False, "error": "trakt_not_connected"}
+            else:
+                try:
+                    movies = search_trakt_movies(query, client_id)
+                    results = [
+                        {
+                            "title": m.get("title"),
+                            "year": m.get("year"),
+                            "trakt_id": m.get("ids", {}).get("trakt")
+                        }
+                        for m in movies
+                    ]
+                    res = {"success": True, "results": results}
+                except Exception as e:
+                    print(f"[Trakt] Error searching movies: {e}")
+                    res = {"success": False, "error": str(e)}
 
             self.wfile.write(json.dumps(res).encode('utf-8'))
 

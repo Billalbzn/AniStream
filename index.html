@@ -1323,6 +1323,24 @@
     <!-- PAGE: MOVIES -->
     <div id="page-movies" style="display: none;">
         <div class="row-section">
+            <!-- MOVIE SEARCH -->
+            <div class="row">
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" id="movie-search-input" class="form-control" style="flex: 1;" placeholder="Rechercher un film (Trakt)..." onkeydown="if(event.key==='Enter') searchMovies()">
+                    <button class="btn-suggest completed" style="margin: 0; padding: 10px 20px;" onclick="searchMovies()">Rechercher</button>
+                </div>
+            </div>
+
+            <!-- ROW: MOVIE SEARCH RESULTS -->
+            <div id="section-movie-search" class="row" style="display: none;">
+                <h2 class="row-title">Résultats de recherche</h2>
+                <div class="row-container">
+                    <button class="slider-btn left-btn" onclick="scrollRow(this, -1)">‹</button>
+                    <div id="row-movie-search" class="row-posters"></div>
+                    <button class="slider-btn right-btn" onclick="scrollRow(this, 1)">›</button>
+                </div>
+            </div>
+
             <!-- ROW: MY MOVIES (FILMS LOCAUX) -->
             <div id="section-movies" class="row" style="display: none;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -2180,8 +2198,45 @@
             document.getElementById('movie-modal-year').innerText = movie.year || '';
             document.getElementById('movie-torrent-search-input').value = movie.title || '';
             document.getElementById('movie-torrent-results-list').innerHTML = '';
+            document.getElementById('movie-modal-play-btn').style.display = movie.file_path ? '' : 'none';
             document.getElementById('movie-modal-overlay').style.display = 'flex';
             document.body.style.overflow = 'hidden';
+        }
+
+        async function searchMovies() {
+            const queryInput = document.getElementById('movie-search-input');
+            const queryText = queryInput.value.trim();
+            const section = document.getElementById('section-movie-search');
+            const row = document.getElementById('row-movie-search');
+
+            if (!queryText) return;
+
+            section.style.display = 'block';
+            row.innerHTML = '<div class="loading-screen"><div class="spinner"></div></div>';
+
+            try {
+                const res = await fetch(`/api/movies/search?query=${encodeURIComponent(queryText)}`);
+                const result = await res.json();
+
+                row.innerHTML = '';
+                if (!result.success || !Array.isArray(result.results) || result.results.length === 0) {
+                    row.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem; font-style: italic; margin: 0;">Aucun résultat.</p>';
+                    return;
+                }
+
+                for (const movie of result.results) {
+                    const card = document.createElement('div');
+                    card.className = 'poster-card';
+                    card.innerHTML = `
+                        <div class="card-title-fallback">${movie.title}${movie.year ? ' (' + movie.year + ')' : ''}</div>
+                    `;
+                    card.onclick = () => showMovieModal(movie);
+                    row.appendChild(card);
+                }
+            } catch (err) {
+                console.error("Movie search failed:", err);
+                row.innerHTML = '<p style="color: #e50914; font-size: 0.9rem; margin: 0;">Erreur lors de la recherche.</p>';
+            }
         }
 
         function closeMovieModal(event) {
