@@ -2857,14 +2857,24 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                             print(f"[API] Error launching qBittorrent via CLI: {e}")
                             
                     if not success:
-                        print(f"[API] qBittorrent CLI not found or failed. Falling back to individual startfile.")
-                        try:
-                            for arg in torrent_args:
-                                os.startfile(arg)
-                            success = True
-                            method = "system_association_individual"
-                        except Exception as e:
-                            print(f"[API] Error opening individual torrents: {e}")
+                        if len(torrent_args) == 1:
+                            print(f"[API] qBittorrent CLI not found or failed. Falling back to system association.")
+                            try:
+                                os.startfile(torrent_args[0])
+                                success = True
+                                method = "system_association_individual"
+                            except Exception as e:
+                                print(f"[API] Error opening torrent: {e}")
+                        else:
+                            # Avoid opening one window per torrent: open the folder
+                            # containing all downloaded .torrent files instead.
+                            print(f"[API] qBittorrent CLI not found or failed. Opening folder with {len(torrent_args)} torrent files.")
+                            try:
+                                os.startfile(temp_dir)
+                                success = True
+                                method = "system_association_folder"
+                            except Exception as e:
+                                print(f"[API] Error opening torrents folder: {e}")
                             
             self.send_response(200 if success else 500)
             self.send_header('Content-type', 'application/json')

@@ -1426,6 +1426,10 @@
                         <div><span style="color: #fff; font-weight: 600;">Genres :</span> <span id="modal-genres">-</span></div>
                         <div><span style="color: #fff; font-weight: 600;">Studio :</span> <span id="modal-studios">-</span></div>
                         <div><span style="color: #fff; font-weight: 600;">Popularité :</span> <span id="modal-popularity">-</span></div>
+                        <div id="modal-related-section" style="display: none; margin-top: 4px;">
+                            <span style="color: #fff; font-weight: 600;">Lié à cet anime :</span>
+                            <div id="modal-related-list" style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px;"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -1454,6 +1458,7 @@
                     
                     <!-- Quick Actions -->
                     <div id="download-quick-actions" style="display: flex; gap: 12px; margin-bottom: 15px; flex-wrap: wrap;">
+                        <button id="btn-download-rest" class="btn-suggest watching" style="display: none; padding: 10px 16px; margin: 0; font-size: 0.9rem;" onclick="downloadRemainingEpisodes()">📥 Télécharger les épisodes restants</button>
                         <button id="btn-download-kai" class="btn-suggest plan" style="padding: 10px 16px; margin: 0; font-size: 0.9rem; background: rgba(100,180,255,0.15); border: 1px solid rgba(100,180,255,0.35); color: #7ec8ff;" onclick="downloadKaiVersion()">🎬 Version Kaï</button>
                     </div>
 
@@ -2598,6 +2603,23 @@
                   id
                   site
                 }
+                relations {
+                  edges {
+                    relationType
+                    node {
+                      id
+                      idMal
+                      type
+                      title {
+                        romaji
+                        english
+                      }
+                      coverImage {
+                        large
+                      }
+                    }
+                  }
+                }
               }
             }
             `;
@@ -2635,6 +2657,54 @@
                 console.error("[AniList] GraphQL fetch failed:", e);
             }
             return null;
+        }
+
+        const RELATION_TYPE_LABELS = {
+            'SEQUEL': 'Suite',
+            'PREQUEL': 'Préquelle',
+            'SIDE_STORY': 'Histoire annexe',
+            'SPIN_OFF': 'Spin-off',
+            'ALTERNATIVE': 'Version alternative',
+            'PARENT': 'Série principale',
+            'FULL_STORY': 'Histoire complète',
+            'SUMMARY': 'Résumé'
+        };
+
+        function renderRelatedAnime(data) {
+            const section = document.getElementById('modal-related-section');
+            const list = document.getElementById('modal-related-list');
+            list.innerHTML = '';
+
+            const edges = (data.relations && data.relations.edges) ? data.relations.edges : [];
+            const related = edges.filter(e => e.node && e.node.type === 'ANIME' && RELATION_TYPE_LABELS[e.relationType]);
+
+            if (related.length === 0) {
+                section.style.display = 'none';
+                return;
+            }
+
+            section.style.display = 'block';
+            for (const edge of related) {
+                const node = edge.node;
+                const title = node.title.english || node.title.romaji;
+                const card = document.createElement('div');
+                card.className = 'related-anime-card';
+                card.style = 'display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 6px; border-radius: 6px; transition: background 0.2s;';
+                card.onmouseenter = () => card.style.background = 'rgba(255,255,255,0.06)';
+                card.onmouseleave = () => card.style.background = 'transparent';
+                card.innerHTML = `
+                    <img src="${node.coverImage?.large || ''}" style="width: 40px; height: 56px; object-fit: cover; border-radius: 4px; flex-shrink: 0; background: #222;">
+                    <div style="display: flex; flex-direction: column; min-width: 0;">
+                        <span style="color: #fff; font-size: 0.9rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${title}</span>
+                        <span style="font-size: 0.78rem; color: var(--text-muted);">${RELATION_TYPE_LABELS[edge.relationType]}</span>
+                    </div>
+                `;
+                card.onclick = () => {
+                    const libItem = libraryData.find(i => i.mal_id === node.idMal);
+                    showAnimeModal(libItem ? libItem.folder_name : title, !libItem, node.idMal);
+                };
+                list.appendChild(card);
+            }
         }
 
         function translateStatus(status) {
@@ -2917,6 +2987,9 @@
             document.getElementById('modal-genres').innerText = '-';
             document.getElementById('modal-studios').innerText = '-';
             document.getElementById('modal-popularity').innerText = '-';
+            document.getElementById('modal-related-section').style.display = 'none';
+            document.getElementById('modal-related-list').innerHTML = '';
+            document.getElementById('btn-download-rest').style.display = 'none';
 
             const modalVideoContainer = document.getElementById('modal-banner-video-container');
             if (modalVideoContainer) {
@@ -2986,6 +3059,9 @@
                 
                 document.getElementById('modal-popularity').innerText = data.popularity ? `${data.popularity.toLocaleString()} membres` : '-';
 
+                // Show related anime (sequels, prequels, side stories, etc.)
+                renderRelatedAnime(data);
+
                 // Show trailer button if trailer exists
                 const trailerBtn = document.getElementById('modal-trailer-btn');
                 let trailerId = null;
@@ -3025,6 +3101,18 @@
             if (!isSuggestion && item) {
                 // Show clean watched button if we watched at least 1 episode AND we have files in local library
                 document.getElementById('btn-clean-watched').style.display = (item.watched_episodes > 0 && item.total_files > 0) ? 'inline-block' : 'none';
+
+                // Show "download remaining episodes" button if we know the total episode
+                // count (from AniList) and there are still episodes missing locally
+                const maxEpPresent = (item.files && item.files.length > 0) ? Math.max(...item.files.map(f => typeof f.episode_number === 'number' ? f.episode_number : 0)) : 0;
+                const nextEpToDownload = Math.max(maxEpPresent, item.watched_episodes) + 1;
+                const btnDownloadRest = document.getElementById('btn-download-rest');
+                if (data && data.episodes && nextEpToDownload <= data.episodes) {
+                    btnDownloadRest.style.display = 'inline-block';
+                    btnDownloadRest.innerText = `📥 Télécharger les épisodes restants (${nextEpToDownload} à ${data.episodes})`;
+                } else {
+                    btnDownloadRest.style.display = 'none';
+                }
 
                 // Show play button
                 const modalPlayBtn = document.getElementById('modal-play-btn');
@@ -3107,8 +3195,9 @@
                                    { title: name, mal_id: currentMalId };
                 document.getElementById('modal-suggestion-actions').style.display = 'flex';
 
-                // Hide clean button since it's just a suggestion (not in library)
+                // Hide clean button and download-remaining button since it's just a suggestion (not in library)
                 document.getElementById('btn-clean-watched').style.display = 'none';
+                document.getElementById('btn-download-rest').style.display = 'none';
             }
         }
 
@@ -3769,6 +3858,80 @@
                 }
             } catch (err) {
                 console.error("Torrent download failed:", err);
+                alertToast("❌ Erreur de communication avec le serveur.");
+            }
+        }
+
+        async function downloadRemainingEpisodes() {
+            if (!activeLibraryItem || !activeDetailedData || !activeDetailedData.episodes) return;
+
+            const maxEpPresent = (activeLibraryItem.files && activeLibraryItem.files.length > 0) ? Math.max(...activeLibraryItem.files.map(f => typeof f.episode_number === 'number' ? f.episode_number : 0)) : 0;
+            const startEp = Math.max(maxEpPresent, activeLibraryItem.watched_episodes) + 1;
+            const endEp = activeDetailedData.episodes;
+            if (startEp > endEp) return;
+
+            const titles = [];
+            if (activeDetailedData.title.romaji) titles.push(activeDetailedData.title.romaji);
+            if (activeDetailedData.title.english) titles.push(activeDetailedData.title.english);
+            const queryText = titles.join('|');
+            if (!queryText) return;
+
+            const animeTitle = activeDetailedData.title.english || activeDetailedData.title.romaji;
+
+            const batchTorrents = [];
+            for (let ep = startEp; ep <= endEp; ep++) {
+                try {
+                    alertToast(`🔍 Recherche de l'épisode ${ep}/${endEp}...`);
+                    const res = await fetch(`/api/torrent/search?query=${encodeURIComponent(queryText)}&episode=${ep}`);
+                    const torrents = await res.json();
+                    if (torrents && torrents.length > 0) {
+                        const bestTorrent = torrents[0];
+                        batchTorrents.push({
+                            magnet: bestTorrent.magnet,
+                            torrent_url: bestTorrent.torrent_url,
+                            episode: ep
+                        });
+                    } else {
+                        console.warn(`No torrent found for episode ${ep}`);
+                    }
+                    await new Promise(r => setTimeout(r, 600));
+                } catch (e) {
+                    console.error(`Error searching episode ${ep}:`, e);
+                }
+            }
+
+            if (batchTorrents.length === 0) {
+                alertToast(`❌ Aucun des épisodes restants (${startEp} à ${endEp}) n'a été trouvé.`);
+                return;
+            }
+
+            alertToast(`📥 Envoi de ${batchTorrents.length} torrent(s) au client...`);
+            try {
+                const dlRes = await fetch('/api/torrent/download_batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        torrents: batchTorrents,
+                        anime_title: animeTitle,
+                        start_ep: startEp,
+                        end_ep: endEp
+                    })
+                });
+                const dlResult = await dlRes.json();
+                if (dlResult.success) {
+                    if (dlResult.method === 'qbittorrent') {
+                        alertToast(`🎉 ✅ ${batchTorrents.length} torrents ajoutés à qBittorrent dans : ${dlResult.path}`);
+                    } else if (dlResult.method === 'qbittorrent_cli') {
+                        alertToast(`🎉 ✅ Client qBittorrent lancé avec ${batchTorrents.length} torrents.`);
+                    } else {
+                        alertToast(`🎉 ✅ ${batchTorrents.length} torrents prêts dans : ${dlResult.path}`);
+                    }
+                    setTimeout(loadDashboard, 3000);
+                } else {
+                    alertToast(`❌ Échec de l'envoi du lot de torrents.`);
+                }
+            } catch (e) {
+                console.error("Batch torrent download failed:", e);
                 alertToast("❌ Erreur de communication avec le serveur.");
             }
         }
