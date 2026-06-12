@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AvocadoHub - Startpage</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #08080a;
+            --card-bg: rgba(18, 18, 22, 0.65);
+            --accent-red: #da1212;
+            --accent-red-glow: rgba(218, 18, 18, 0.4);
+            --accent-purple: #7b1fa2;
+            --accent-purple-glow: rgba(123, 31, 162, 0.4);
+            --accent-blue: #1976d2;
+            --accent-blue-glow: rgba(25, 118, 210, 0.4);
+            --text-color: #f1f1f4;
+            --text-muted: #9fa2a6;
+            --border-glow: rgba(218, 18, 18, 0.15);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(circle at 5% 5%, rgba(218, 18, 18, 0.08) 0%, transparent 35%),
+                radial-gradient(circle at 95% 95%, rgba(123, 31, 162, 0.08) 0%, transparent 35%);
+            color: var(--text-color);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px 20px;
+            overflow-y: auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            background: linear-gradient(135deg, #ffffff 40%, var(--accent-red) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 40px rgba(218, 18, 18, 0.3);
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            font-weight: 300;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+            width: 100%;
+            max-width: 1100px;
+            margin-bottom: 40px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 20px;
+            padding: 24px;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: var(--accent-red);
+            opacity: 0.7;
+        }
+
+        .card-purple::before {
+            background: var(--accent-purple);
+        }
+
+        .card-blue::before {
+            background: var(--accent-blue);
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            border-color: rgba(218, 18, 18, 0.3);
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.5), 0 0 20px rgba(218, 18, 18, 0.05);
+        }
+
+        .card-purple:hover {
+            border-color: rgba(123, 31, 162, 0.3);
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.5), 0 0 20px rgba(123, 31, 162, 0.05);
+        }
+
+        .card-blue:hover {
+            border-color: rgba(25, 118, 210, 0.3);
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.5), 0 0 20px rgba(25, 118, 210, 0.05);
+        }
+
+        .card-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .links-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            flex-grow: 1;
+        }
+
+        .links-list li a {
+            color: var(--text-color);
+            text-decoration: none;
+            font-size: 0.95rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 14px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.02);
+            transition: all 0.2s ease;
+        }
+
+        .links-list li a:hover {
+            background: rgba(255, 255, 255, 0.07);
+            transform: translateX(4px);
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .link-desc {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+            font-weight: 300;
+        }
+
+        .current-read-card {
+            grid-column: 1 / -1;
+            background: linear-gradient(135deg, rgba(18, 18, 22, 0.9), rgba(218, 18, 18, 0.08));
+            border: 1px solid rgba(218, 18, 18, 0.2);
+        }
+
+        .current-read-content {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+        }
+
+        .current-read-text h3 {
+            font-size: 1.2rem;
+            margin-bottom: 6px;
+            color: #fff;
+        }
+
+        .current-read-text p {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .btn-read {
+            background: var(--accent-red);
+            color: #fff;
+            text-decoration: none;
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px var(--accent-red-glow);
+        }
+
+        .btn-read:hover {
+            background: #f01414;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(218, 18, 18, 0.5);
+        }
+
+        footer {
+            margin-top: auto;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            font-weight: 300;
+            text-align: center;
+        }
+
+        @media (max-width: 768px) {
+            .current-read-content {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 16px;
+            }
+            .btn-read {
+                width: 100%;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>AvocadoHub</h1>
+        <p>Startpage & Centralisation des Solutions</p>
+    </div>
+
+    <div class="container" style="width: 100%; max-width: 1100px;">
+        <div class="grid">
+            
+            <!-- CURRENT READ (TOP WIDE CARD) -->
+            <div class="card current-read-card">
+                <div class="current-read-content">
+                    <div class="current-read-text">
+                        <span style="font-size: 0.8rem; color: var(--accent-red); font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">En cours de lecture 📚</span>
+                        <h3 style="margin-top: 4px;">Crisis on Infinite Earths (2025 Compendium)</h3>
+                        <p>Le chef-d'œuvre cosmique de DC dans sa version ultime "Fan-made". À lire dans YACReader.</p>
+                    </div>
+                    <a href="https://getcomics.org/dc/crisis-on-infinite-earths-the-ultimate-compendium-2025-fan-made/" target="_blank" class="btn-read">Télécharger sur GetComics ⬇️</a>
+                </div>
+            </div>
+
+            <!-- CARD 1: ANIME & TRACKING -->
+            <div class="card">
+                <div class="card-title">🇯🇵 Anime & Profils</div>
+                <ul class="links-list">
+                    <li>
+                        <a href="https://anilist.co/user/AvocadoDeska/" target="_blank">
+                            <div>
+                                <span>Mon Profil AniList</span>
+                                <div class="link-desc">Suivi de vos séries et statistiques (AvocadoDeska)</div>
+                            </div>
+                            <span>↗️</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="http://localhost:8000" target="_blank">
+                            <div>
+                                <span>Local List Builder (Serveur)</span>
+                                <div class="link-desc">Interface locale pour trier les 500 suggestions d'animes</div>
+                            </div>
+                            <span>↗️</span>
+                        </a>
+                    </li>
+                </ul>
+            </div>
+
+            <!-- CARD 2: COMICS CHRONOLOGY -->
+            <div class="card card-purple">
+                <div class="card-title">🦸 Ordres de Lecture (Comics)</div>
+                <ul class="links-list">
+                    <li>
+                        <a href="https://www.continuityguide.net/" target="_blank">
+                            <div>
+                                <span>Continuity Guide (Marvel)</span>
+                                <div class="link-desc">Chronologie interactive de l'univers Marvel moderne</div>
+                            </div>
+                            <span>↗️</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="https://www.comicbookherald.com/" target="_blank">
+                            <div>
+                                <span>Comic Book Herald</span>
+                                <div class="link-desc">Sélection de tomes et ordres de lecture pour débutants</div>
+                            </div>
+                            <span>↗️</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="https://comicbookreadingorders.com/" target="_blank">
+                            <div>
+                                <span>Comic Book Reading Orders</span>
+                                <div class="link-desc">Ordre exact d'apparition par chapitres et crossovers</div>
+                            </div>
+                            <span>↗️</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="https://leagueofcomicgeeks.com/" target="_blank">
+                            <div>
+                                <span>League of Comic Geeks</span>
+                                <div class="link-desc">Réseau social et ordres créés par la communauté</div>
+                            </div>
+                            <span>↗️</span>
+                        </a>
+                    </li>
+                </ul>
+            </div>
+
+            <!-- CARD 3: SECURITY & CONFIGS -->
+            <div class="card card-blue">
+                <div class="card-title">⚙️ Securité & PC Configuration</div>
+                <ul class="links-list">
+                    <li>
+                        <a href="https://bitwarden.com/" target="_blank">
+                            <div>
+                                <span>Bitwarden Web Vault</span>
+                                <div class="link-desc">Coffre-fort de mots de passe synchronisé</div>
+                            </div>
+                            <span>↗️</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="guide_setup_pc_gamer.md" target="_blank">
+                            <div>
+                                <span>Guide de Configuration PC Gamer</span>
+                                <div class="link-desc">Guide pas-à-pas pour configurer VLC, Taiga et AvocadoStream</div>
+                            </div>
+                            <span>📄</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="file:///C:/Users/tsumu/.gemini/antigravity/brain/f9329fa9-f458-4f27-a425-0663b58a7b1d/performance_comparison.md" target="_blank">
+                            <div>
+                                <span>Comparatif VM vs PC Gamer</span>
+                                <div class="link-desc">Analyse des performances pour le futur Dual Boot</div>
+                            </div>
+                            <span>📄</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="file:///C:/Users/tsumu/.gemini/antigravity/brain/f9329fa9-f458-4f27-a425-0663b58a7b1d/installation_guide_trackers.md" target="_blank">
+                            <div>
+                                <span>Rapport d'installation Trackers</span>
+                                <div class="link-desc">Guide de configuration pour Taiga et Trakt scrobbler</div>
+                            </div>
+                            <span>📄</span>
+                        </a>
+                    </li>
+                </ul>
+            </div>
+
+        </div>
+    </div>
+
+    <footer>
+        <p>AvocadoHub v1.0 • Généré localement dans Documents\projet_test</p>
+    </footer>
+
+</body>
+</html>

@@ -1,0 +1,18 @@
+# Sensitive/local config (contains AniList token + qBittorrent credentials)
+config.json
+
+# Personal library/progress data
+myanimelist.xml
+recommendations_cache.json
+
+# Build artifacts
+build/
+dist/
+__pycache__/
+*.spec
+
+# Logs
+*.log
+
+# Ad-hoc debug/test scripts and scratch data
+scratch/

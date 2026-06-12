@@ -1,0 +1,9 @@
+{
+    "anime_dir": "C:\\Anime",
+    "anilist_client_id": "",
+    "anilist_token": "",
+    "qbittorrent_enabled": false,
+    "qbittorrent_host": "http://localhost:8080",
+    "qbittorrent_username": "admin",
+    "qbittorrent_password": "adminadmin"
+}
