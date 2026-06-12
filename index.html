@@ -1280,6 +1280,12 @@
             </div>
         </div>
 
+        <!-- ROW: EN COURS (simplified list, click to open + install missing episodes) -->
+        <div id="section-watching-list" class="row" style="display: none;">
+            <h2 class="row-title">▶️ En cours de lecture</h2>
+            <div id="watching-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+        </div>
+
         <!-- ROW 2: ALL LOCAL LIBRARY (MA BIBLIOTHÈQUE) -->
         <div id="section-library" class="row">
             <h2 class="row-title">Ma Bibliothèque Locale</h2>
@@ -2215,6 +2221,11 @@
                 rowContinue.innerHTML = '';
                 let hasContinue = false;
 
+                const watchingList = document.getElementById('watching-list');
+                const sectionWatchingList = document.getElementById('section-watching-list');
+                watchingList.innerHTML = '';
+                let hasWatching = false;
+
                 // Render poster cards
                 for (const item of libraryData) {
                     renderPosterCard(item, rowLibrary, false);
@@ -2226,8 +2237,12 @@
                     if (hasActiveProgress || isWatchingOnAnilist) {
                         renderPosterCard(item, rowContinue, true);
                         hasContinue = true;
+                        renderWatchingRow(item, watchingList);
+                        hasWatching = true;
                     }
                 }
+
+                sectionWatchingList.style.display = hasWatching ? 'block' : 'none';
 
                 sectionContinue.style.display = hasContinue ? 'block' : 'none';
 
@@ -2864,6 +2879,49 @@
                     }
                 }, 2500);
             }
+        }
+
+        function renderWatchingRow(item, container) {
+            const row = document.createElement('div');
+            row.style = 'display: flex; align-items: center; justify-content: space-between; gap: 12px; background: rgba(255,255,255,0.04); border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: background 0.2s;';
+            row.onmouseenter = () => row.style.background = 'rgba(255,255,255,0.08)';
+            row.onmouseleave = () => row.style.background = 'rgba(255,255,255,0.04)';
+
+            const activeFile = item.files.find(f => f.progress_time > 10 && f.progress_percent < 95);
+            let progressText;
+            if (activeFile) {
+                const epIndex = item.files.indexOf(activeFile) + 1;
+                const remainingMin = Math.round((activeFile.progress_length - activeFile.progress_time) / 60);
+                progressText = `Ép. ${epIndex} • Reste ${remainingMin} min`;
+            } else {
+                progressText = `Épisode suivant : ${item.watched_episodes + 1}`;
+            }
+
+            row.innerHTML = `
+                <div style="display: flex; flex-direction: column; min-width: 0;">
+                    <span style="color: #fff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.folder_name}</span>
+                    <span style="font-size: 0.85rem; color: var(--text-muted);">${progressText}</span>
+                </div>
+                <button class="btn-suggest watching" style="padding: 8px 14px; margin: 0; font-size: 0.85rem; flex-shrink: 0;">📥 Installer ce qu'il manque</button>
+            `;
+
+            row.onclick = () => showAnimeModal(item.folder_name, false);
+            row.querySelector('button').onclick = (e) => {
+                e.stopPropagation();
+                downloadMissingEpisodesForItem(item);
+            };
+
+            container.appendChild(row);
+        }
+
+        async function downloadMissingEpisodesForItem(item) {
+            alertToast(`🔍 Recherche des informations sur "${item.folder_name}"...`);
+            const data = await fetchAniListDetails(item.mal_id, item.folder_name);
+            if (!data || !data.episodes) {
+                alertToast(`❌ Impossible de déterminer le nombre total d'épisodes pour "${item.folder_name}".`);
+                return;
+            }
+            await downloadRemainingEpisodes(item, data);
         }
 
         async function renderPosterCard(item, container, isContinueRow) {
@@ -3862,21 +3920,26 @@
             }
         }
 
-        async function downloadRemainingEpisodes() {
-            if (!activeLibraryItem || !activeDetailedData || !activeDetailedData.episodes) return;
+        async function downloadRemainingEpisodes(libraryItem = null, detailedData = null) {
+            libraryItem = libraryItem || activeLibraryItem;
+            detailedData = detailedData || activeDetailedData;
+            if (!libraryItem || !detailedData || !detailedData.episodes) return;
 
-            const maxEpPresent = (activeLibraryItem.files && activeLibraryItem.files.length > 0) ? Math.max(...activeLibraryItem.files.map(f => typeof f.episode_number === 'number' ? f.episode_number : 0)) : 0;
-            const startEp = Math.max(maxEpPresent, activeLibraryItem.watched_episodes) + 1;
-            const endEp = activeDetailedData.episodes;
-            if (startEp > endEp) return;
+            const maxEpPresent = (libraryItem.files && libraryItem.files.length > 0) ? Math.max(...libraryItem.files.map(f => typeof f.episode_number === 'number' ? f.episode_number : 0)) : 0;
+            const startEp = Math.max(maxEpPresent, libraryItem.watched_episodes) + 1;
+            const endEp = detailedData.episodes;
+            if (startEp > endEp) {
+                alertToast(`✅ Tous les épisodes de "${libraryItem.folder_name}" sont déjà présents.`);
+                return;
+            }
 
             const titles = [];
-            if (activeDetailedData.title.romaji) titles.push(activeDetailedData.title.romaji);
-            if (activeDetailedData.title.english) titles.push(activeDetailedData.title.english);
+            if (detailedData.title.romaji) titles.push(detailedData.title.romaji);
+            if (detailedData.title.english) titles.push(detailedData.title.english);
             const queryText = titles.join('|');
             if (!queryText) return;
 
-            const animeTitle = activeDetailedData.title.english || activeDetailedData.title.romaji;
+            const animeTitle = detailedData.title.english || detailedData.title.romaji;
 
             const batchTorrents = [];
             for (let ep = startEp; ep <= endEp; ep++) {

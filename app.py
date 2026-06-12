@@ -111,6 +111,50 @@ def find_qbittorrent():
     qb_in_path = which("qbittorrent.exe") or which("qbittorrent")
     if qb_in_path:
         return qb_in_path
+    # Check Windows uninstall registry entries (covers custom install locations,
+    # e.g. installed on D:\ or another non-default drive)
+    try:
+        import winreg
+        uninstall_keys = [
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+        ]
+        for hive, base_path in uninstall_keys:
+            try:
+                with winreg.OpenKey(hive, base_path) as base_key:
+                    for i in range(winreg.QueryInfoKey(base_key)[0]):
+                        subkey_name = winreg.EnumKey(base_key, i)
+                        try:
+                            with winreg.OpenKey(base_key, subkey_name) as subkey:
+                                display_name, _ = winreg.QueryValueEx(subkey, "DisplayName")
+                                if "qbittorrent" not in display_name.lower():
+                                    continue
+                                install_location, _ = winreg.QueryValueEx(subkey, "InstallLocation")
+                                candidate = os.path.join(install_location, "qbittorrent.exe")
+                                if os.path.exists(candidate):
+                                    return candidate
+                        except FileNotFoundError:
+                            continue
+                        except OSError:
+                            continue
+            except FileNotFoundError:
+                continue
+    except Exception:
+        pass
+    # Last resort: if qBittorrent is already running (e.g. portable install with
+    # no registry entry), ask Windows for the running process's executable path.
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "(Get-CimInstance Win32_Process -Filter \"Name='qbittorrent.exe'\" | Select-Object -First 1 -ExpandProperty ExecutablePath)"],
+            capture_output=True, text=True, timeout=5
+        )
+        path = result.stdout.strip()
+        if path and os.path.exists(path):
+            return path
+    except Exception:
+        pass
     return None
 
 # Words/markers allowed to immediately follow a matched title in a torrent name
