@@ -673,10 +673,10 @@ def get_recommendations_from_anilist(username):
                 if folder_name in folder_mappings:
                     local_mal_ids.append(int(folder_mappings[folder_name]))
                     continue
-                norm_folder = folder_name.lower().replace(" ", "").replace("-", "").replace("_", "")
+                norm_folder = re.sub(r'[\s\-_.]', '', folder_name.lower())
                 for title, m_id in SUGGESTIONS:
-                    norm_title = title.lower().replace(" ", "").replace("-", "").replace("_", "")
-                    if norm_folder in norm_title or norm_title in norm_folder:
+                    norm_title = re.sub(r'[\s\-_.]', '', title.lower())
+                    if len(norm_title) >= 4 and len(norm_folder) >= 4 and (norm_folder in norm_title or norm_title in norm_folder):
                         local_mal_ids.append(int(m_id))
                         break
         except Exception as e:
@@ -701,10 +701,10 @@ def get_recommendations_from_anilist(username):
             if pf in folder_mappings:
                 played_mal_ids.append(int(folder_mappings[pf]))
                 continue
-            norm_pf = pf.lower().replace(" ", "").replace("-", "").replace("_", "")
+            norm_pf = re.sub(r'[\s\-_.]', '', pf.lower())
             for title, m_id in SUGGESTIONS:
-                norm_title = title.lower().replace(" ", "").replace("-", "").replace("_", "")
-                if norm_pf in norm_title or norm_title in norm_pf:
+                norm_title = re.sub(r'[\s\-_.]', '', title.lower())
+                if len(norm_title) >= 4 and len(norm_pf) >= 4 and (norm_pf in norm_title or norm_title in norm_pf):
                     played_mal_ids.append(int(m_id))
                     break
                     
@@ -1206,36 +1206,37 @@ def resolve_mal_id_for_folder(folder_name, videos, folder_mappings):
         # 1. Try to guess from filenames first
         guessed = guess_title_from_filenames(videos)
         if guessed:
-            norm_guessed = guessed.lower().replace(" ", "").replace("-", "").replace("_", "")
+            norm_guessed = re.sub(r'[\s\-_.]', '', guessed.lower())
             # Try exact match
             for title, m_id in SUGGESTIONS:
-                norm_title = title.lower().replace(" ", "").replace("-", "").replace("_", "")
+                norm_title = re.sub(r'[\s\-_.]', '', title.lower())
                 if norm_guessed == norm_title:
                     mal_id = m_id
                     matched_title = title
                     break
             if not mal_id:
-                # Try substring match
+                # Try substring match (require a minimum length to avoid short
+                # titles like "K" matching as a substring of unrelated names)
                 for title, m_id in SUGGESTIONS:
-                    norm_title = title.lower().replace(" ", "").replace("-", "").replace("_", "")
-                    if norm_guessed in norm_title or norm_title in norm_guessed:
+                    norm_title = re.sub(r'[\s\-_.]', '', title.lower())
+                    if len(norm_title) >= 4 and len(norm_guessed) >= 4 and (norm_guessed in norm_title or norm_title in norm_guessed):
                         mal_id = m_id
                         matched_title = title
                         break
 
         if not mal_id:
             # Fallback to matching folder name
-            norm_folder = folder_name.lower().replace(" ", "").replace("-", "").replace("_", "")
+            norm_folder = re.sub(r'[\s\-_.]', '', folder_name.lower())
             for title, m_id in SUGGESTIONS:
-                norm_title = title.lower().replace(" ", "").replace("-", "").replace("_", "")
+                norm_title = re.sub(r'[\s\-_.]', '', title.lower())
                 if norm_folder == norm_title:
                     mal_id = m_id
                     matched_title = title
                     break
             if not mal_id:
                 for title, m_id in SUGGESTIONS:
-                    norm_title = title.lower().replace(" ", "").replace("-", "").replace("_", "")
-                    if norm_folder in norm_title or norm_title in norm_folder:
+                    norm_title = re.sub(r'[\s\-_.]', '', title.lower())
+                    if len(norm_title) >= 4 and len(norm_folder) >= 4 and (norm_folder in norm_title or norm_title in norm_folder):
                         mal_id = m_id
                         matched_title = title
                         break
@@ -1697,10 +1698,10 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                             if entry.name in folder_mappings:
                                 local_ids_set.add(int(folder_mappings[entry.name]))
                                 continue
-                            norm_folder = entry.name.lower().replace(" ", "").replace("-", "").replace("_", "")
+                            norm_folder = re.sub(r'[\s\-_.]', '', entry.name.lower())
                             for title, m_id in SUGGESTIONS:
-                                norm_title = title.lower().replace(" ", "").replace("-", "").replace("_", "")
-                                if norm_folder in norm_title or norm_title in norm_folder:
+                                norm_title = re.sub(r'[\s\-_.]', '', title.lower())
+                                if len(norm_title) >= 4 and len(norm_folder) >= 4 and (norm_folder in norm_title or norm_title in norm_folder):
                                     local_ids_set.add(int(m_id))
                                     break
                 except Exception:
