@@ -46,6 +46,9 @@ _trakt_movie_cache = {}
 _letterboxd_rss_cache = {}
 LETTERBOXD_RSS_CACHE_TTL = 1800  # 30 minutes
 
+# In-memory cache of TMDB poster paths, keyed by tmdb movie id
+_tmdb_poster_cache = {}
+
 vlc_status_data = {
     "file_path": None,
     "state": "stopped",
@@ -1320,12 +1323,38 @@ def fetch_letterboxd_user_rss(username):
                     entry['film_title'] = child.text
                 elif tag == 'filmYear':
                     entry['film_year'] = child.text
+                elif tag == 'description' and child.text:
+                    img_match = re.search(r'<img[^>]+src="([^"]+)"', child.text)
+                    if img_match:
+                        entry['poster_url'] = img_match.group(1)
             items.append(entry)
     except Exception as e:
         print(f"[Letterboxd] Error fetching RSS for '{username}': {e}")
 
     _letterboxd_rss_cache[cache_key] = (now, items)
     return items
+
+def fetch_tmdb_poster_url(tmdb_id, api_key, size='w342'):
+    """Fetches and caches a movie's poster URL from TMDB, given its TMDB id. Returns None on failure."""
+    if not tmdb_id or not api_key:
+        return None
+
+    cache_key = tmdb_id
+    if cache_key in _tmdb_poster_cache:
+        poster_path = _tmdb_poster_cache[cache_key]
+    else:
+        poster_path = None
+        url = f'https://api.themoviedb.org/3/movie/{tmdb_id}?api_key={urllib.parse.quote(api_key)}'
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                poster_path = data.get('poster_path')
+        except Exception as e:
+            print(f"[TMDB] Error fetching poster for tmdb id '{tmdb_id}': {e}")
+        _tmdb_poster_cache[cache_key] = poster_path
+
+    return f'https://image.tmdb.org/t/p/{size}{poster_path}' if poster_path else None
 
 def trakt_request_device_code(client_id):
     """Starts the Trakt OAuth device-code flow, returning the dict with
@@ -1378,6 +1407,43 @@ def fetch_trakt_movie_recommendations(client_id, access_token, limit=20):
     )
     with urllib.request.urlopen(req, timeout=5) as response:
         return json.loads(response.read().decode('utf-8'))
+
+def fetch_trakt_watchlist_movies(client_id, access_token):
+    """Fetches the user's movie watchlist from Trakt."""
+    req = urllib.request.Request(
+        f'{TRAKT_API_URL}/sync/watchlist/movies',
+        headers={
+            'Content-Type': 'application/json',
+            'trakt-api-version': '2',
+            'trakt-api-key': client_id,
+            'Authorization': f'Bearer {access_token}',
+            'User-Agent': 'Mozilla/5.0'
+        }
+    )
+    with urllib.request.urlopen(req, timeout=5) as response:
+        return json.loads(response.read().decode('utf-8'))
+
+def add_movie_to_trakt_watchlist(client_id, access_token, trakt_id):
+    """Adds a movie to the user's Trakt watchlist. Returns True on success."""
+    req = urllib.request.Request(
+        f'{TRAKT_API_URL}/sync/watchlist',
+        data=json.dumps({"movies": [{"ids": {"trakt": int(trakt_id)}}]}).encode('utf-8'),
+        headers={
+            'Content-Type': 'application/json',
+            'trakt-api-version': '2',
+            'trakt-api-key': client_id,
+            'Authorization': f'Bearer {access_token}',
+            'User-Agent': 'Mozilla/5.0'
+        },
+        method='POST'
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            response.read()
+        return True
+    except Exception as e:
+        print(f"[Trakt] Error adding movie {trakt_id} to watchlist: {e}")
+        return False
 
 def rate_movie_on_trakt(client_id, access_token, trakt_id, rating):
     """Sends a rating (1-10) and marks a movie as watched 'now' on Trakt.tv."""
@@ -1988,6 +2054,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             config = load_config()
             movies_dir = config.get("movies_dir", r"C:\Films")
             trakt_client_id = config.get("trakt_client_id")
+            tmdb_api_key = config.get("tmdb_api_key")
 
             if not os.path.exists(movies_dir):
                 res = {"success": False, "movies_dir": movies_dir, "error": "directory_not_found"}
@@ -1999,12 +2066,14 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                         if os.path.isfile(full_path) and f.lower().endswith(('.mkv', '.mp4', '.avi', '.mov')):
                             guessed_title, guessed_year = guess_movie_title_from_filename(f)
                             trakt_movie = fetch_trakt_movie(guessed_title, trakt_client_id, guessed_year)
+                            tmdb_id = trakt_movie.get("ids", {}).get("tmdb") if trakt_movie else None
                             movie_entry = {
                                 "file_name": f,
                                 "file_path": full_path,
                                 "title": trakt_movie.get("title") if trakt_movie else guessed_title,
                                 "year": trakt_movie.get("year") if trakt_movie else guessed_year,
                                 "trakt_id": trakt_movie.get("ids", {}).get("trakt") if trakt_movie else None,
+                                "poster_url": fetch_tmdb_poster_url(tmdb_id, tmdb_api_key),
                             }
                             movies.append(movie_entry)
                     res = {"success": True, "movies_dir": movies_dir, "movies": movies}
@@ -2021,6 +2090,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
 
             config = load_config()
             client_id = config.get("trakt_client_id")
+            tmdb_api_key = config.get("tmdb_api_key")
             query_params = urllib.parse.parse_qs(url.query)
             query = query_params.get('query', [''])[0]
 
@@ -2033,7 +2103,8 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                         {
                             "title": m.get("title"),
                             "year": m.get("year"),
-                            "trakt_id": m.get("ids", {}).get("trakt")
+                            "trakt_id": m.get("ids", {}).get("trakt"),
+                            "poster_url": fetch_tmdb_poster_url(m.get("ids", {}).get("tmdb"), tmdb_api_key)
                         }
                         for m in movies
                     ]
@@ -2068,7 +2139,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
 
             config = load_config()
             friends_raw = config.get("letterboxd_friends", "")
-            usernames = [u.strip() for u in friends_raw.split(",") if u.strip()]
+            usernames = [u.strip() for u in re.split(r'[,\n]+', friends_raw) if u.strip()]
 
             activity = []
             for username in usernames:
@@ -2093,6 +2164,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             config = load_config()
             client_id = config.get("trakt_client_id")
             access_token = config.get("trakt_access_token")
+            tmdb_api_key = config.get("tmdb_api_key")
 
             if not (client_id and access_token):
                 res = {"success": False, "error": "trakt_not_connected"}
@@ -2103,13 +2175,45 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                         {
                             "title": m.get("title"),
                             "year": m.get("year"),
-                            "trakt_id": m.get("ids", {}).get("trakt")
+                            "trakt_id": m.get("ids", {}).get("trakt"),
+                            "poster_url": fetch_tmdb_poster_url(m.get("ids", {}).get("tmdb"), tmdb_api_key)
                         }
                         for m in movies
                     ]
                     res = {"success": True, "recommendations": recs}
                 except Exception as e:
                     print(f"[Trakt] Error fetching movie recommendations: {e}")
+                    res = {"success": False, "error": str(e)}
+
+            self.wfile.write(json.dumps(res).encode('utf-8'))
+
+        elif url.path == '/api/movies/watchlist':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+
+            config = load_config()
+            client_id = config.get("trakt_client_id")
+            access_token = config.get("trakt_access_token")
+            tmdb_api_key = config.get("tmdb_api_key")
+
+            if not (client_id and access_token):
+                res = {"success": False, "error": "trakt_not_connected"}
+            else:
+                try:
+                    items = fetch_trakt_watchlist_movies(client_id, access_token)
+                    watchlist = [
+                        {
+                            "title": item.get("movie", {}).get("title"),
+                            "year": item.get("movie", {}).get("year"),
+                            "trakt_id": item.get("movie", {}).get("ids", {}).get("trakt"),
+                            "poster_url": fetch_tmdb_poster_url(item.get("movie", {}).get("ids", {}).get("tmdb"), tmdb_api_key)
+                        }
+                        for item in items
+                    ]
+                    res = {"success": True, "watchlist": watchlist}
+                except Exception as e:
+                    print(f"[Trakt] Error fetching watchlist: {e}")
                     res = {"success": False, "error": str(e)}
 
             self.wfile.write(json.dumps(res).encode('utf-8'))
@@ -2917,6 +3021,60 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"success": success}).encode('utf-8'))
 
+        elif url.path == '/api/movies/rate_manual':
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            params = json.loads(post_data.decode('utf-8'))
+
+            rating = params.get('rating')
+            trakt_id = params.get('trakt_id')
+            title = params.get('title')
+            year = params.get('year')
+
+            config = load_config()
+            client_id = config.get("trakt_client_id")
+            access_token = config.get("trakt_access_token")
+
+            success = False
+            if rating and trakt_id and client_id and access_token:
+                success = rate_movie_on_trakt(client_id, access_token, trakt_id, rating)
+
+            if rating:
+                ratings = config.get("letterboxd_ratings", [])
+                ratings.append({
+                    "title": title,
+                    "year": year,
+                    "rating": round(rating / 2, 1),  # Trakt 1-10 -> Letterboxd 0.5-5 stars
+                    "watched_date": datetime.now().strftime('%Y-%m-%d')
+                })
+                config["letterboxd_ratings"] = ratings
+                save_config(config)
+
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"success": success}).encode('utf-8'))
+
+        elif url.path == '/api/movies/watchlist/add':
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            params = json.loads(post_data.decode('utf-8'))
+
+            trakt_id = params.get('trakt_id')
+
+            config = load_config()
+            client_id = config.get("trakt_client_id")
+            access_token = config.get("trakt_access_token")
+
+            success = False
+            if trakt_id and client_id and access_token:
+                success = add_movie_to_trakt_watchlist(client_id, access_token, trakt_id)
+
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"success": success}).encode('utf-8'))
+
         elif url.path == '/api/launcher/play':
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
@@ -3083,6 +3241,8 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                 config["trakt_refresh_token"] = params['trakt_refresh_token']
             if 'letterboxd_friends' in params:
                 config["letterboxd_friends"] = params['letterboxd_friends']
+            if 'tmdb_api_key' in params:
+                config["tmdb_api_key"] = params['tmdb_api_key']
 
             success = save_config(config)
             

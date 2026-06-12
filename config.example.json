@@ -11,5 +11,6 @@
     "trakt_client_secret": "",
     "trakt_access_token": "",
     "trakt_refresh_token": "",
-    "letterboxd_friends": ""
+    "letterboxd_friends": "",
+    "tmdb_api_key": ""
 }

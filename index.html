@@ -1356,6 +1356,18 @@
                 </div>
             </div>
 
+            <!-- ROW: MOVIE WATCHLIST (TRAKT "A VOIR") -->
+            <div id="section-movie-watchlist" class="row" style="display: none;">
+                <h2 class="row-title">🔖 Ma liste à voir (Trakt)</h2>
+                <div class="row-container">
+                    <button class="slider-btn left-btn" onclick="scrollRow(this, -1)">‹</button>
+                    <div id="row-movie-watchlist" class="row-posters">
+                        <div class="loading-screen"><div class="spinner"></div></div>
+                    </div>
+                    <button class="slider-btn right-btn" onclick="scrollRow(this, 1)">›</button>
+                </div>
+            </div>
+
             <!-- ROW: MOVIE RECOMMENDATIONS (TRAKT) -->
             <div id="section-movie-recs" class="row" style="display: none;">
                 <h2 class="row-title">Recommandations (Trakt)</h2>
@@ -1585,10 +1597,24 @@
                 </h3>
 
                 <div class="form-group" style="margin-bottom: 15px;">
-                    <label style="font-weight: 600; color: #fff;">Pseudos de tes amis (séparés par des virgules) :</label>
-                    <input type="text" id="letterboxd-friends-input" class="form-control" placeholder="Ex: ami1, ami2, ami3">
+                    <label style="font-weight: 600; color: #fff;">Pseudos de tes amis (un par ligne, ou séparés par des virgules) :</label>
+                    <textarea id="letterboxd-friends-input" class="form-control" rows="3" placeholder="ami1&#10;ami2&#10;ami3" style="resize: vertical;"></textarea>
                     <span style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.4; margin-top: 5px;">
-                        Utilisé pour afficher l'activité de tes amis (flux RSS publics Letterboxd).
+                        Utilisé pour afficher l'activité de tes amis (flux RSS publics Letterboxd). Colle toute ta liste d'un coup, une ligne par pseudo.
+                    </span>
+                </div>
+
+                <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 20px 0;">
+
+                <h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 15px; color: #fff; display: flex; align-items: center; gap: 8px;">
+                    🖼️ Affiches des films (TMDB)
+                </h3>
+
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label style="font-weight: 600; color: #fff;">Clé API TMDB :</label>
+                    <input type="password" id="tmdb-api-key-input" class="form-control" placeholder="Entrez votre clé API TMDB (v3 auth)">
+                    <span style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.4; margin-top: 5px;">
+                        Crée une clé gratuite sur <a href="https://www.themoviedb.org/settings/api" target="_blank" style="color: var(--accent-red); text-decoration: underline;">themoviedb.org/settings/api</a> pour afficher les affiches des films.
                     </span>
                 </div>
 
@@ -1605,10 +1631,15 @@
         <div class="anime-modal" style="max-width: 520px;" onclick="event.stopPropagation()">
             <button class="btn-close-modal" onclick="closeMovieModal()">×</button>
             <div style="padding: 30px;">
+                <img id="movie-modal-poster" src="" alt="" style="display: none; width: 140px; border-radius: var(--radius-md); float: right; margin: 0 0 15px 15px;">
                 <h2 id="movie-modal-title" class="modal-title" style="font-size: 1.8rem; font-weight: 700; margin-bottom: 5px;">Titre</h2>
                 <p id="movie-modal-year" style="color: var(--text-muted); margin-bottom: 20px;"></p>
 
-                <button id="movie-modal-play-btn" class="btn-hero btn-hero-play" style="padding: 10px 24px; font-size: 1rem; width: fit-content; gap: 8px; margin-bottom: 20px;" onclick="playActiveMovie()">► Lecture</button>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px;">
+                    <button id="movie-modal-play-btn" class="btn-hero btn-hero-play" style="padding: 10px 24px; font-size: 1rem; width: fit-content; gap: 8px; margin: 0;" onclick="playActiveMovie()">► Lecture</button>
+                    <button id="movie-modal-watchlist-btn" class="btn-suggest plan" style="padding: 10px 20px; margin: 0;" onclick="addActiveMovieToWatchlist()">🔖 À voir</button>
+                    <button id="movie-modal-rate-btn" class="btn-suggest completed" style="padding: 10px 20px; margin: 0;" onclick="rateActiveMovie()">⭐ Noter</button>
+                </div>
 
                 <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 20px 0;">
 
@@ -1933,9 +1964,12 @@
             }
         }
 
-        function showMovieRatingPopup(title) {
+        let activeRatingTarget = null;
+
+        function showMovieRatingPopup(title, manualTarget = null) {
             const overlay = document.getElementById('movie-rating-overlay');
             if (overlay.style.display === 'flex') return; // already shown
+            activeRatingTarget = manualTarget;
             document.getElementById('movie-rating-title').innerText = title || '';
             const stars = document.getElementById('movie-rating-stars');
             stars.innerHTML = '';
@@ -1954,15 +1988,29 @@
         function closeMovieRatingPopup() {
             document.getElementById('movie-rating-overlay').style.display = 'none';
             document.body.style.overflow = '';
+            activeRatingTarget = null;
         }
 
         async function submitMovieRating(rating) {
             try {
-                await fetch('/api/movies/rate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ rating: rating })
-                });
+                if (activeRatingTarget) {
+                    await fetch('/api/movies/rate_manual', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            rating: rating,
+                            trakt_id: activeRatingTarget.trakt_id,
+                            title: activeRatingTarget.title,
+                            year: activeRatingTarget.year
+                        })
+                    });
+                } else {
+                    await fetch('/api/movies/rate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rating: rating })
+                    });
+                }
                 alertToast(`✅ Note envoyée sur Trakt : ${rating}/10`);
             } catch (err) {
                 console.error("Failed to submit movie rating:", err);
@@ -1972,11 +2020,13 @@
 
         async function skipMovieRating() {
             try {
-                await fetch('/api/movies/rate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ rating: null })
-                });
+                if (!activeRatingTarget) {
+                    await fetch('/api/movies/rate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rating: null })
+                    });
+                }
             } catch (err) {
                 console.error("Failed to skip movie rating:", err);
             }
@@ -1992,6 +2042,7 @@
             document.getElementById('page-movies').style.display = isMovies ? '' : 'none';
             if (isMovies) {
                 loadMovies();
+                loadMovieWatchlist();
                 loadMovieRecommendations();
                 loadLetterboxdFriendsActivity();
             }
@@ -2161,6 +2212,13 @@
             }
         }
 
+        function moviePosterCardHtml(movie, fallbackLabel, badgeHtml = '') {
+            if (movie.poster_url) {
+                return `<img src="${movie.poster_url}" alt="${fallbackLabel}" loading="lazy">${badgeHtml}`;
+            }
+            return `<div class="card-title-fallback">${fallbackLabel}</div>${badgeHtml}`;
+        }
+
         async function loadMovies() {
             const section = document.getElementById('section-movies');
             const row = document.getElementById('row-movies');
@@ -2180,9 +2238,7 @@
                 for (const movie of result.movies) {
                     const card = document.createElement('div');
                     card.className = 'poster-card';
-                    card.innerHTML = `
-                        <div class="card-title-fallback">${movie.title}${movie.year ? ' (' + movie.year + ')' : ''}</div>
-                    `;
+                    card.innerHTML = moviePosterCardHtml(movie, `${movie.title}${movie.year ? ' (' + movie.year + ')' : ''}`);
                     card.onclick = () => showMovieModal(movie);
                     row.appendChild(card);
                 }
@@ -2199,8 +2255,47 @@
             document.getElementById('movie-torrent-search-input').value = movie.title || '';
             document.getElementById('movie-torrent-results-list').innerHTML = '';
             document.getElementById('movie-modal-play-btn').style.display = movie.file_path ? '' : 'none';
+
+            const poster = document.getElementById('movie-modal-poster');
+            if (movie.poster_url) {
+                poster.src = movie.poster_url;
+                poster.style.display = '';
+            } else {
+                poster.style.display = 'none';
+            }
+
+            const hasTraktId = !!movie.trakt_id;
+            document.getElementById('movie-modal-watchlist-btn').style.display = hasTraktId ? '' : 'none';
+            document.getElementById('movie-modal-rate-btn').style.display = hasTraktId ? '' : 'none';
+
             document.getElementById('movie-modal-overlay').style.display = 'flex';
             document.body.style.overflow = 'hidden';
+        }
+
+        async function addActiveMovieToWatchlist() {
+            if (!activeMovieItem || !activeMovieItem.trakt_id) return;
+            try {
+                const res = await fetch('/api/movies/watchlist/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ trakt_id: activeMovieItem.trakt_id })
+                });
+                const result = await res.json();
+                if (result.success) {
+                    alertToast(`🔖 Ajouté à ta liste à voir : ${activeMovieItem.title}`);
+                    loadMovieWatchlist();
+                } else {
+                    alertToast(`⚠️ Connecte-toi à Trakt pour utiliser la liste à voir.`);
+                }
+            } catch (err) {
+                console.error("Failed to add movie to watchlist:", err);
+            }
+        }
+
+        function rateActiveMovie() {
+            if (!activeMovieItem || !activeMovieItem.trakt_id) return;
+            closeMovieModal();
+            showMovieRatingPopup(activeMovieItem.title, activeMovieItem);
         }
 
         async function searchMovies() {
@@ -2227,9 +2322,7 @@
                 for (const movie of result.results) {
                     const card = document.createElement('div');
                     card.className = 'poster-card';
-                    card.innerHTML = `
-                        <div class="card-title-fallback">${movie.title}${movie.year ? ' (' + movie.year + ')' : ''}</div>
-                    `;
+                    card.innerHTML = moviePosterCardHtml(movie, `${movie.title}${movie.year ? ' (' + movie.year + ')' : ''}`);
                     card.onclick = () => showMovieModal(movie);
                     row.appendChild(card);
                 }
@@ -2251,6 +2344,35 @@
             closeMovieModal();
         }
 
+        async function loadMovieWatchlist() {
+            const section = document.getElementById('section-movie-watchlist');
+            const row = document.getElementById('row-movie-watchlist');
+
+            try {
+                const res = await fetch('/api/movies/watchlist');
+                const result = await res.json();
+
+                if (!result.success || !Array.isArray(result.watchlist) || result.watchlist.length === 0) {
+                    section.style.display = 'none';
+                    return;
+                }
+
+                section.style.display = 'block';
+                row.innerHTML = '';
+
+                for (const movie of result.watchlist) {
+                    const card = document.createElement('div');
+                    card.className = 'poster-card';
+                    card.innerHTML = moviePosterCardHtml(movie, `${movie.title}${movie.year ? ' (' + movie.year + ')' : ''}`);
+                    card.onclick = () => showMovieModal(movie);
+                    row.appendChild(card);
+                }
+            } catch (err) {
+                console.error("Failed to load movie watchlist", err);
+                section.style.display = 'none';
+            }
+        }
+
         async function loadMovieRecommendations() {
             const section = document.getElementById('section-movie-recs');
             const row = document.getElementById('row-movie-recs');
@@ -2270,9 +2392,8 @@
                 for (const movie of result.recommendations) {
                     const card = document.createElement('div');
                     card.className = 'poster-card';
-                    card.innerHTML = `
-                        <div class="card-title-fallback">${movie.title}${movie.year ? ' (' + movie.year + ')' : ''}</div>
-                    `;
+                    card.innerHTML = moviePosterCardHtml(movie, `${movie.title}${movie.year ? ' (' + movie.year + ')' : ''}`);
+                    card.onclick = () => showMovieModal(movie);
                     row.appendChild(card);
                 }
             } catch (err) {
@@ -2302,19 +2423,32 @@
                     card.className = 'poster-card';
                     const filmTitle = entry.film_title || entry.title || '';
                     const rating = entry.rating ? '★'.repeat(Math.round(parseFloat(entry.rating))) : '';
-                    card.innerHTML = `
-                        <div class="card-title-fallback">${filmTitle}</div>
-                        <div class="card-badge card-badge-muted">${entry.username}${rating ? ' • ' + rating : ''}</div>
-                    `;
-                    if (entry.link) {
-                        card.onclick = () => window.open(entry.link, '_blank');
-                    }
+                    const badge = `<div class="card-badge card-badge-muted">${entry.username}${rating ? ' • ' + rating : ''}</div>`;
+                    card.innerHTML = moviePosterCardHtml(entry, filmTitle, badge);
+                    card.onclick = () => openFriendActivityMovie(entry);
                     row.appendChild(card);
                 }
             } catch (err) {
                 console.error("Failed to load Letterboxd friends activity", err);
                 section.style.display = 'none';
             }
+        }
+
+        async function openFriendActivityMovie(entry) {
+            const filmTitle = entry.film_title || entry.title || '';
+            try {
+                const res = await fetch(`/api/movies/search?query=${encodeURIComponent(filmTitle)}`);
+                const result = await res.json();
+                if (result.success && Array.isArray(result.results) && result.results.length > 0) {
+                    const movie = result.results[0];
+                    if (!movie.poster_url && entry.poster_url) movie.poster_url = entry.poster_url;
+                    showMovieModal(movie);
+                    return;
+                }
+            } catch (err) {
+                console.error("Failed to look up friend activity movie on Trakt:", err);
+            }
+            if (entry.link) window.open(entry.link, '_blank');
         }
 
         async function loadSuggestions() {
@@ -3333,6 +3467,7 @@
                 document.getElementById('trakt-access-token-input').value = config.trakt_access_token || '';
                 document.getElementById('trakt-connect-status').innerText = config.trakt_access_token ? '✅ Connecté à Trakt' : '';
                 document.getElementById('letterboxd-friends-input').value = config.letterboxd_friends || '';
+                document.getElementById('tmdb-api-key-input').value = config.tmdb_api_key || '';
                 
                 // qBittorrent settings
                 const qbEnabled = config.qbittorrent_enabled || false;
@@ -3364,6 +3499,7 @@
             const traktClientSecret = document.getElementById('trakt-client-secret-input').value.trim();
             const traktAccessToken = document.getElementById('trakt-access-token-input').value.trim();
             const letterboxdFriends = document.getElementById('letterboxd-friends-input').value.trim();
+            const tmdbApiKey = document.getElementById('tmdb-api-key-input').value.trim();
 
             const qbEnabled = document.getElementById('qbittorrent-enabled-input').checked;
             const qbHost = document.getElementById('qbittorrent-host-input').value.trim();
@@ -3385,6 +3521,7 @@
                         trakt_client_secret: traktClientSecret,
                         trakt_access_token: traktAccessToken,
                         letterboxd_friends: letterboxdFriends,
+                        tmdb_api_key: tmdbApiKey,
                         qbittorrent_enabled: qbEnabled,
                         qbittorrent_host: qbHost,
                         qbittorrent_username: qbUser,
