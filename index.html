@@ -2715,31 +2715,30 @@
                     // Try to figure out which anime this file belongs to from active library data
                     try {
                         const norm = path.replace(/\\/g, '/');
-                        const parts = norm.split('/');
-                        const folderName = parts.length >= 2 ? parts[parts.length - 2] : null;
-                        if (folderName) {
-                            // Find the library item matching this folder
-                            const libItem = (libraryData || []).find(i => i.folder_name === folderName);
-                            const malId = libItem ? libItem.mal_id : null;
+                        // Match by file path (works regardless of nested release folder structure)
+                        const libItem = (libraryData || []).find(i =>
+                            (i.files || []).some(f => (f.path || '').replace(/\\/g, '/') === norm)
+                        );
+                        const malId = libItem ? libItem.mal_id : null;
+                        const folderName = libItem ? libItem.folder_name : null;
 
-                            if (malId && planningStatusCache[malId] === 'PLANNING') {
-                                // Get AniList ID
-                                let anilistMediaId = null;
-                                const cached = anilistDataCache[malId];
-                                if (cached && cached.id) {
-                                    anilistMediaId = cached.id;
-                                } else {
-                                    const details = await fetchAniListDetails(malId);
-                                    if (details && details.id) anilistMediaId = details.id;
-                                }
+                        if (malId && planningStatusCache[malId] === 'PLANNING') {
+                            // Get AniList ID
+                            let anilistMediaId = null;
+                            const cached = anilistDataCache[malId];
+                            if (cached && cached.id) {
+                                anilistMediaId = cached.id;
+                            } else {
+                                const details = await fetchAniListDetails(malId);
+                                if (details && details.id) anilistMediaId = details.id;
+                            }
 
-                                if (anilistMediaId) {
-                                    const ok = await saveToAniList(anilistMediaId, 'watching');
-                                    if (ok) {
-                                        console.log(`[Planning] Auto-moved "${folderName}" from PLANNING to CURRENT on AniList.`);
-                                        showToast(`🎥 "${folderName}" passé en "En cours" sur AniList !`);
-                                        removePlanningCard(malId);
-                                    }
+                            if (anilistMediaId) {
+                                const ok = await saveToAniList(anilistMediaId, 'watching');
+                                if (ok) {
+                                    console.log(`[Planning] Auto-moved "${folderName}" from PLANNING to CURRENT on AniList.`);
+                                    showToast(`🎥 "${folderName}" passé en "En cours" sur AniList !`);
+                                    removePlanningCard(malId);
                                 }
                             }
                         }
