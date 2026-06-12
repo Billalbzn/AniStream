@@ -36,8 +36,15 @@ vlc_status_data = {
     "time": 0,
     "length": 0,
     "remaining": 0,
-    "percent": 0
+    "percent": 0,
+    "mal_id": None,
+    "episode_number": None,
+    "anilist_status": None,
+    "anilist_synced": False
 }
+
+# Episode is considered "watched" for AniList sync once playback reaches this percent
+ANILIST_SYNC_THRESHOLD = 90
 
 def find_vlc():
     """Finds the VLC installation path on Windows."""
@@ -251,6 +258,22 @@ def poll_vlc_status():
                         
                         if vlc_status_data.get("file_path"):
                             save_playback_progress(vlc_status_data["file_path"], vlc_time, vlc_length)
+
+                        # Auto-sync watched episode to AniList once the episode is mostly done
+                        if (percent >= ANILIST_SYNC_THRESHOLD
+                                and not vlc_status_data.get("anilist_synced")
+                                and vlc_status_data.get("mal_id")
+                                and vlc_status_data.get("episode_number")):
+                            config = load_config()
+                            token = config.get("anilist_token")
+                            if token:
+                                # Mark as synced immediately to avoid firing this repeatedly while the request is in flight
+                                vlc_status_data["anilist_synced"] = True
+                                threading.Thread(
+                                    target=sync_anilist_progress,
+                                    args=(token, vlc_status_data["mal_id"], vlc_status_data["episode_number"]),
+                                    daemon=True
+                                ).start()
                 else:
                     # VLC reports stopped - force save the last known position
                     if vlc_status_data.get("state") in ["playing", "paused"] and vlc_status_data.get("file_path"):
@@ -386,6 +409,105 @@ def fetch_anilist_viewer_username(token):
     except Exception as e:
         print(f"[AniList] Error fetching viewer username: {e}")
         return None
+
+def fetch_anilist_media_status(mal_id, token):
+    """Resolves the AniList media ID and the viewer's current progress/status for a MAL ID.
+    Needed for SaveMediaListEntry mutations and to avoid overwriting progress with a lower value."""
+    url = 'https://graphql.anilist.co'
+    query = '''
+    query ($idMal: Int) {
+      Media (idMal: $idMal, type: ANIME) {
+        id
+        mediaListEntry {
+          progress
+          status
+        }
+      }
+    }
+    '''
+    data = json.dumps({'query': query, 'variables': {'idMal': int(mal_id)}}).encode('utf-8')
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'User-Agent': 'Mozilla/5.0',
+            'Authorization': f'Bearer {token}'
+        }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            res_json = json.loads(response.read().decode('utf-8'))
+            media = res_json.get('data', {}).get('Media', {}) or {}
+            entry = media.get('mediaListEntry') or {}
+            return {
+                "id": media.get('id'),
+                "progress": entry.get('progress') or 0,
+                "status": entry.get('status')
+            }
+    except Exception as e:
+        print(f"[AniList] Error resolving AniList status for MAL {mal_id}: {e}")
+        return None
+
+def update_anilist_progress(token, anilist_media_id, progress, set_status_current=False):
+    """Updates the progress (and optionally status) of an entry on the user's AniList."""
+    url = 'https://graphql.anilist.co'
+    if set_status_current:
+        query = '''
+        mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus) {
+          SaveMediaListEntry (mediaId: $mediaId, progress: $progress, status: $status) {
+            id
+            progress
+            status
+          }
+        }
+        '''
+        variables = {'mediaId': int(anilist_media_id), 'progress': int(progress), 'status': 'CURRENT'}
+    else:
+        query = '''
+        mutation ($mediaId: Int, $progress: Int) {
+          SaveMediaListEntry (mediaId: $mediaId, progress: $progress) {
+            id
+            progress
+            status
+          }
+        }
+        '''
+        variables = {'mediaId': int(anilist_media_id), 'progress': int(progress)}
+
+    data = json.dumps({'query': query, 'variables': variables}).encode('utf-8')
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'User-Agent': 'Mozilla/5.0',
+            'Authorization': f'Bearer {token}'
+        }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            res_json = json.loads(response.read().decode('utf-8'))
+            entry = res_json.get('data', {}).get('SaveMediaListEntry', {})
+            print(f"[AniList] Progress updated: mediaId={anilist_media_id} -> episode {progress} (status={entry.get('status')})")
+            return True
+    except Exception as e:
+        print(f"[AniList] Error updating progress for mediaId {anilist_media_id}: {e}")
+        return False
+
+def sync_anilist_progress(token, mal_id, episode_number):
+    """Pushes the watched episode progress to AniList, unless the viewer's current progress
+    is already at or beyond this episode (e.g. rewatching an old episode).
+    Runs in a background thread so it doesn't block the VLC status poller."""
+    status = fetch_anilist_media_status(mal_id, token)
+    if not status or not status.get("id"):
+        return
+    if episode_number <= (status.get("progress") or 0):
+        print(f"[AniList] Skipping progress sync for mediaId {status['id']}: episode {episode_number} <= current progress {status.get('progress')}")
+        return
+    update_anilist_progress(token, status["id"], episode_number)
 
 def fetch_anilist_trending():
     """Queries AniList's GraphQL API for trending and popular anime."""
@@ -987,6 +1109,58 @@ def guess_title_from_filenames(videos):
                 return title_part
     return None
 
+def resolve_mal_id_for_folder(folder_name, videos, folder_mappings):
+    """Resolves a (mal_id, matched_title) pair for an anime folder, using explicit
+    folder_mappings first, then guessing from filenames/folder name against SUGGESTIONS."""
+    mal_id = None
+    matched_title = folder_name
+
+    if folder_name in folder_mappings:
+        mal_id = int(folder_mappings[folder_name])
+        for title, m_id in SUGGESTIONS:
+            if int(m_id) == mal_id:
+                matched_title = title
+                break
+    else:
+        # 1. Try to guess from filenames first
+        guessed = guess_title_from_filenames(videos)
+        if guessed:
+            norm_guessed = guessed.lower().replace(" ", "").replace("-", "").replace("_", "")
+            # Try exact match
+            for title, m_id in SUGGESTIONS:
+                norm_title = title.lower().replace(" ", "").replace("-", "").replace("_", "")
+                if norm_guessed == norm_title:
+                    mal_id = m_id
+                    matched_title = title
+                    break
+            if not mal_id:
+                # Try substring match
+                for title, m_id in SUGGESTIONS:
+                    norm_title = title.lower().replace(" ", "").replace("-", "").replace("_", "")
+                    if norm_guessed in norm_title or norm_title in norm_guessed:
+                        mal_id = m_id
+                        matched_title = title
+                        break
+
+        if not mal_id:
+            # Fallback to matching folder name
+            norm_folder = folder_name.lower().replace(" ", "").replace("-", "").replace("_", "")
+            for title, m_id in SUGGESTIONS:
+                norm_title = title.lower().replace(" ", "").replace("-", "").replace("_", "")
+                if norm_folder == norm_title:
+                    mal_id = m_id
+                    matched_title = title
+                    break
+            if not mal_id:
+                for title, m_id in SUGGESTIONS:
+                    norm_title = title.lower().replace(" ", "").replace("-", "").replace("_", "")
+                    if norm_folder in norm_title or norm_title in norm_folder:
+                        mal_id = m_id
+                        matched_title = title
+                        break
+
+    return mal_id, matched_title
+
 def get_library(anime_dir):
     """Scans configured anime_dir for folders containing video files and returns their info."""
     library = []
@@ -1054,53 +1228,8 @@ def get_library(anime_dir):
             videos.sort()
             
             # Try to match the folder name to get the mal_id from config or SUGGESTIONS (ignoring spaces/hyphens)
-            mal_id = None
-            matched_title = folder_name
-            
-            if folder_name in folder_mappings:
-                mal_id = int(folder_mappings[folder_name])
-                for title, m_id in SUGGESTIONS:
-                    if int(m_id) == mal_id:
-                        matched_title = title
-                        break
-            else:
-                # 1. Try to guess from filenames first
-                guessed = guess_title_from_filenames(videos)
-                if guessed:
-                    norm_guessed = guessed.lower().replace(" ", "").replace("-", "").replace("_", "")
-                    # Try exact match
-                    for title, m_id in SUGGESTIONS:
-                        norm_title = title.lower().replace(" ", "").replace("-", "").replace("_", "")
-                        if norm_guessed == norm_title:
-                            mal_id = m_id
-                            matched_title = title
-                            break
-                    if not mal_id:
-                        # Try substring match
-                        for title, m_id in SUGGESTIONS:
-                            norm_title = title.lower().replace(" ", "").replace("-", "").replace("_", "")
-                            if norm_guessed in norm_title or norm_title in norm_guessed:
-                                mal_id = m_id
-                                matched_title = title
-                                break
-                                
-                if not mal_id:
-                    # Fallback to matching folder name
-                    norm_folder = folder_name.lower().replace(" ", "").replace("-", "").replace("_", "")
-                    for title, m_id in SUGGESTIONS:
-                        norm_title = title.lower().replace(" ", "").replace("-", "").replace("_", "")
-                        if norm_folder == norm_title:
-                            mal_id = m_id
-                            matched_title = title
-                            break
-                    if not mal_id:
-                        for title, m_id in SUGGESTIONS:
-                            norm_title = title.lower().replace(" ", "").replace("-", "").replace("_", "")
-                            if norm_folder in norm_title or norm_title in norm_folder:
-                                mal_id = m_id
-                                matched_title = title
-                                break
-            
+            mal_id, matched_title = resolve_mal_id_for_folder(folder_name, videos, folder_mappings)
+
             # Get watched progress (AniList first, then fallback to local XML)
             watched_episodes = 0
             found_in_anilist = False
@@ -2283,7 +2412,29 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                         vlc_status_data["length"] = 0
                         vlc_status_data["remaining"] = 0
                         vlc_status_data["percent"] = 0
-                        
+
+                        # Resolve mal_id/episode number for automatic AniList progress sync
+                        config_for_mal = load_config()
+                        anime_dir = config_for_mal.get("anime_dir", r"C:\Anime")
+                        mal_id = None
+                        try:
+                            rel = os.path.relpath(file_path, anime_dir)
+                            folder_name = rel.split(os.sep)[0]
+                            folder_path_for_mal = os.path.join(anime_dir, folder_name)
+                            videos_for_mal = []
+                            for root, dirs, files in os.walk(folder_path_for_mal):
+                                for f in files:
+                                    if f.lower().endswith(('.mkv', '.mp4', '.avi', '.mov')):
+                                        videos_for_mal.append(os.path.join(root, f))
+                            folder_mappings = config_for_mal.get("folder_mappings", {})
+                            mal_id, _ = resolve_mal_id_for_folder(folder_name, videos_for_mal, folder_mappings)
+                        except Exception as e:
+                            print(f"[Launcher] Could not resolve mal_id for AniList sync: {e}")
+
+                        vlc_status_data["mal_id"] = mal_id
+                        vlc_status_data["episode_number"] = parse_episode_number(os.path.basename(file_path))
+                        vlc_status_data["anilist_synced"] = False
+
                         # Build playlist of subsequent episodes in the same folder
                         parent_dir = os.path.dirname(file_path)
                         playlist = []
