@@ -1303,6 +1303,21 @@ def trakt_poll_device_token(client_id, client_secret, device_code):
     except Exception as e:
         return {"error": str(e)}
 
+def fetch_trakt_movie_recommendations(client_id, access_token, limit=20):
+    """Fetches the user's personalized movie recommendations from Trakt."""
+    req = urllib.request.Request(
+        f'{TRAKT_API_URL}/recommendations/movies?limit={limit}',
+        headers={
+            'Content-Type': 'application/json',
+            'trakt-api-version': '2',
+            'trakt-api-key': client_id,
+            'Authorization': f'Bearer {access_token}',
+            'User-Agent': 'Mozilla/5.0'
+        }
+    )
+    with urllib.request.urlopen(req, timeout=5) as response:
+        return json.loads(response.read().decode('utf-8'))
+
 def rate_movie_on_trakt(client_id, access_token, trakt_id, rating):
     """Sends a rating (1-10) and marks a movie as watched 'now' on Trakt.tv."""
     headers = {
@@ -1935,6 +1950,35 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                 except Exception as e:
                     print(f"[API] Error scanning movies library: {e}")
                     res = {"success": False, "movies_dir": movies_dir, "error": str(e)}
+
+            self.wfile.write(json.dumps(res).encode('utf-8'))
+
+        elif url.path == '/api/movies/recommendations':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+
+            config = load_config()
+            client_id = config.get("trakt_client_id")
+            access_token = config.get("trakt_access_token")
+
+            if not (client_id and access_token):
+                res = {"success": False, "error": "trakt_not_connected"}
+            else:
+                try:
+                    movies = fetch_trakt_movie_recommendations(client_id, access_token)
+                    recs = [
+                        {
+                            "title": m.get("title"),
+                            "year": m.get("year"),
+                            "trakt_id": m.get("ids", {}).get("trakt")
+                        }
+                        for m in movies
+                    ]
+                    res = {"success": True, "recommendations": recs}
+                except Exception as e:
+                    print(f"[Trakt] Error fetching movie recommendations: {e}")
+                    res = {"success": False, "error": str(e)}
 
             self.wfile.write(json.dumps(res).encode('utf-8'))
 
