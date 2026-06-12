@@ -1224,7 +1224,6 @@
             <p id="hero-synopsis" class="hero-synopsis">Initialisation du catalogue local et récupération des données AniList en direct...</p>
             <div class="hero-actions">
                 <button id="hero-play-btn" class="btn-hero btn-hero-play" style="display:none;" onclick="">► Reprendre</button>
-                <button id="hero-info-btn" class="btn-hero btn-hero-info" style="display:none;" onclick="">ℹ️ Plus d'infos</button>
             </div>
         </div>
     </div>
@@ -1892,6 +1891,23 @@
             libraryCache = JSON.parse(localStorage.getItem('library_poster_cache'));
         }
 
+        // Click on the hero banner to toggle sound on the ambient trailer video
+        document.getElementById('hero-banner').addEventListener('click', (e) => {
+            if (e.target.closest('.hero-content')) return;
+            const player = activePlayers['hero-video-container'];
+            if (!player) return;
+            try {
+                if (player.isMuted()) {
+                    player.unMute();
+                    player.setVolume(100);
+                } else {
+                    player.mute();
+                }
+            } catch (err) {
+                console.error("[YT Player] Failed to toggle hero sound:", err);
+            }
+        });
+
         // Change navbar opacity on scroll
         window.addEventListener('scroll', () => {
             const nav = document.getElementById('navbar');
@@ -2046,6 +2062,18 @@
                 loadMovieWatchlist();
                 loadMovieRecommendations();
                 loadLetterboxdFriendsActivity();
+            }
+
+            // Anchor links call preventDefault() above (to avoid full page jumps
+            // before page-anime is shown), so scroll to the target section manually.
+            if (event && event.currentTarget) {
+                const href = event.currentTarget.getAttribute('href') || '';
+                if (href.startsWith('#') && href.length > 1) {
+                    const target = document.querySelector(href);
+                    if (target) {
+                        setTimeout(() => target.scrollIntoView({ behavior: 'smooth' }), 0);
+                    }
+                }
             }
         }
 
@@ -2746,11 +2774,6 @@
             const heroPlayPath = activeFile ? activeFile.path : item.next_episode_path;
             playBtn.style.display = (heroPlayPath) ? 'flex' : 'none';
             playBtn.onclick = () => playEpisode(heroPlayPath);
-
-            // 5. Info Button
-            const infoBtn = document.getElementById('hero-info-btn');
-            infoBtn.style.display = 'flex';
-            infoBtn.onclick = () => showAnimeModal(item.folder_name, false);
 
             // 6. Poster cover
             if (bannerUrl) {
