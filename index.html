@@ -3854,8 +3854,22 @@
                 listContainer.innerHTML = '<div class="loading-screen" style="padding: 10px;"><div class="spinner" style="width: 20px; height: 20px;"></div></div>';
             }
 
+            // Include the English franchise title as an extra variation: French nyaa
+            // releases are usually anchored on it (e.g. "Fire Force S02 VOSTFR"),
+            // which gives far more reliable results than the romaji title alone.
+            const titleVariations = [queryText];
+            const d = activeDetailedData;
+            if (d && d.title) {
+                for (const alt of [d.title.romaji, d.title.english]) {
+                    if (alt && !titleVariations.some(t => t.toLowerCase() === alt.toLowerCase())) {
+                        titleVariations.push(alt);
+                    }
+                }
+            }
+            const searchQuery = titleVariations.join('|');
+
             try {
-                const res = await fetch(`/api/torrent/search?query=${encodeURIComponent(queryText)}&type=manual`);
+                const res = await fetch(`/api/torrent/search?query=${encodeURIComponent(searchQuery)}&type=manual`);
                 const torrents = await res.json();
 
                 listContainer.innerHTML = '';
@@ -3987,6 +4001,28 @@
             if (!queryText) return;
 
             const animeTitle = detailedData.title.english || detailedData.title.romaji;
+            const missingCount = endEp - startEp + 1;
+
+            // When catching up on many episodes, a whole-season pack is far more
+            // reliable than fetching each episode individually (some seasons are
+            // only released as a single pack). Try the pack first.
+            if (missingCount >= 3) {
+                try {
+                    alertToast(`🔍 Recherche du pack de la saison (${missingCount} épisodes manquants)...`);
+                    const packRes = await fetch(`/api/torrent/search?query=${encodeURIComponent(queryText)}&season_pack=1`);
+                    const packs = await packRes.json();
+                    if (packs && packs.length > 0) {
+                        const best = packs[0];
+                        alertToast(`📦 Pack trouvé : ${best.title}`);
+                        await downloadTorrent(best.magnet || '', best.torrent_url || '');
+                        setTimeout(loadDashboard, 3000);
+                        return;
+                    }
+                    alertToast(`ℹ️ Aucun pack de saison trouvé, recherche épisode par épisode...`);
+                } catch (e) {
+                    console.error("Season pack search failed:", e);
+                }
+            }
 
             const batchTorrents = [];
             for (let ep = startEp; ep <= endEp; ep++) {

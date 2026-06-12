@@ -209,6 +209,51 @@ def extract_season_number(text):
 
     return None
 
+# Markers that indicate a season/part within a franchise; stripped to obtain the
+# stable "franchise root" name used to build reliable nyaa.si queries.
+_SEASON_MARKER_RE = re.compile(
+    r'\b(?:'
+    r's\d{1,2}(?:e\d{1,3})?|'                       # S02, S02E05
+    r'(?:season|saison)\s*\d{1,2}|'                  # Season 2, Saison 2
+    r'(?:\d+(?:st|nd|rd|th)|2nd|3rd)\s+season|'      # 2nd Season
+    r'part\s*\d+|cour\s*\d+|'                        # Part 2, Cour 2
+    r'ni no shou|san no shou|yon no shou|go no shou|' # Japanese ordinals
+    r'roku no shou|nana no shou|hachi no shou|'
+    r'kyuu no shou|kyu no shou|juu no shou'
+    r')\b',
+    re.IGNORECASE
+)
+
+def strip_season_markers(title):
+    """Returns the franchise "root" name of a title, with any season/part marker
+    removed (e.g. "Enen no Shouboutai: Ni no Shou" -> "Enen no Shouboutai",
+    "Fire Force Season 2" -> "Fire Force"). Used to build season-anchored
+    search queries that aren't over-constrained by the AniList season title."""
+    root = _SEASON_MARKER_RE.sub(' ', title)
+    # Drop trailing separators left over after removing the marker (": ", " - ")
+    root = re.sub(r'[\s:_\-]+$', '', root)
+    root = re.sub(r'\s{2,}', ' ', root).strip(' :-_')
+    return root or title.strip()
+
+def is_season_pack(title):
+    """Returns True if a torrent title looks like a whole-season pack/batch
+    (covers all episodes of a season) rather than a single episode."""
+    t = title.lower()
+    if any(kw in t for kw in ["batch", "complete", "complète", "intégrale",
+                              "integrale", "season complete"]):
+        return True
+    # Episode range, e.g. "(01-25)", "01~25", "1 - 12"
+    if re.search(r'\b\d{1,3}\s*[-~]\s*\d{1,3}\b', t):
+        return True
+    # A season tag (S0X / Season X / Saison X) without a per-episode number = full season
+    has_season_tag = bool(
+        re.search(r'\bs\d{1,2}\b', t) or
+        re.search(r'\b(?:season|saison)\s*\d{1,2}\b', t)
+    )
+    if has_season_tag and parse_episode_number(title) is None:
+        return True
+    return False
+
 def _has_extension_after_match(title_lower, end_idx):
     """Returns True if the text right after a title match in `title_lower`
     (starting at end_idx) looks like another title word (a sequel/extension name)
@@ -1857,7 +1902,10 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             query_text = query_parsed.get('query', [''])[0]
             episode = query_parsed.get('episode', [''])[0]
             type_param = query_parsed.get('type', [''])[0]
-            
+            # season_pack=1 -> look for a whole-season pack/batch instead of a
+            # single episode (used when catching up on many missing episodes).
+            season_pack = query_parsed.get('season_pack', ['0'])[0] in ('1', 'true')
+
             if not query_text:
                 self.wfile.write(json.dumps([]).encode('utf-8'))
                 return
@@ -1901,8 +1949,16 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                 # simplified variations (which may lose the season marker)
                 # still get matched against the correct season.
                 item_season = extract_season_number(title_item) or 1
+                # The franchise "root" (without season markers) is the stable
+                # anchor used by French releases, e.g. "Fire Force S02 VOSTFR".
+                root = strip_season_markers(title_item)
+                if root and root not in variations:
+                    variations.append(root)
+                    query_seasons[root] = item_season
                 for v in variations:
-                    query_seasons[v] = item_season
+                    query_seasons.setdefault(v, item_season)
+                    v_root = strip_season_markers(v) or v
+                    season_tag = f"S{item_season:02d}"
                     if type_param == 'kai':
                         # Search for specific terms first to avoid generic name flooding
                         search_queries.append((v, f"{v} Fan-Kai"))
@@ -1913,15 +1969,22 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                         search_queries.append((v, f"{v} Kaï"))
                         search_queries.append((v, f"{v} intégrale"))
                         search_queries.append((v, f"{v} integrale"))
+                    elif season_pack:
+                        # Look for a whole-season pack: anchor on the franchise
+                        # root + season tag, which is how packs are named
+                        # (e.g. "Fire Force S02 VOSTFR", "Enen no Shouboutai S02").
+                        search_queries.append((v, f"{v_root} {season_tag} VOSTFR"))
+                        search_queries.append((v, f"{v_root} Saison {item_season} VOSTFR"))
+                        search_queries.append((v, f"{v_root} {season_tag} Batch VOSTFR"))
+                        search_queries.append((v, f"{v_root} intégrale VOSTFR"))
                     elif type_param == 'manual':
                         # For manual search, search exactly what the user typed
                         search_queries.append((v, v))
-                        # Also try a VOSTFR + season-tagged query, since the bare
-                        # title alone often surfaces unrelated/other-season
-                        # releases (e.g. "Enen no Shouboutai" alone returns mostly
-                        # Season 3 results on nyaa.si) while season 1 releases are
-                        # usually tagged "S01 VOSTFR".
-                        search_queries.append((v, f"{v} S{item_season:02d} VOSTFR"))
+                        # Also try a season-anchored query on the franchise root,
+                        # since the bare title alone often surfaces other-season
+                        # releases (e.g. "Enen no Shouboutai" returns mostly
+                        # Season 3) while the right results are tagged "S0X VOSTFR".
+                        search_queries.append((v, f"{v_root} {season_tag} VOSTFR"))
                     elif episode:
                         # Format episode as 2 digits (e.g. 05)
                         try:
@@ -1934,7 +1997,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                         # some seasons are only released as a single pack without
                         # per-episode numbering in the title (e.g. "Enen no
                         # Shouboutai - Ni no Shou - S02 - VOSTFR").
-                        search_queries.append((v, f"{v} S{item_season:02d} VOSTFR"))
+                        search_queries.append((v, f"{v_root} {season_tag} VOSTFR"))
                     else:
                         search_queries.append((v, f"{v} VOSTFR"))
                 
@@ -2014,11 +2077,16 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                         if ep_int is not None and not episode_matches(title, ep_int):
                             continue
 
+                        # In season-pack mode, only keep whole-season packs/batches
+                        if season_pack and not is_season_pack(title):
+                            continue
+
                         seen_magnets.add(magnet)
                         results.append({
                             "title": title,
                             "magnet": magnet,
                             "torrent_url": link,
+                            "is_pack": is_season_pack(title),
                             "size": size,
                             "seeders": int(seeders) if seeders.isdigit() else 0,
                             "leechers": int(leechers) if leechers.isdigit() else 0,
@@ -2070,19 +2138,26 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                 if ep_int is not None and not episode_matches(av_title, ep_int):
                     continue
 
+                if season_pack and not is_season_pack(av_title):
+                    continue
+
                 seen_links.add(av_link)
                 results.append({
                     "title": av_title,
                     "magnet": None,
                     "torrent_url": av_link,
+                    "is_pack": is_season_pack(av_title),
                     "size": "Unknown",
                     "seeders": 0,
                     "leechers": 0,
                     "source": "animevost"
                 })
 
-            # Sort by seeders descending
-            results.sort(key=lambda x: x['seeders'], reverse=True)
+            # Sort by seeders descending; in season-pack mode, prefer packs first.
+            if season_pack:
+                results.sort(key=lambda x: (x.get('is_pack', False), x['seeders']), reverse=True)
+            else:
+                results.sort(key=lambda x: x['seeders'], reverse=True)
             self.wfile.write(json.dumps(results).encode('utf-8'))
             
         elif url.path == '/api/anilist/watching':
