@@ -1266,6 +1266,43 @@ def fetch_trakt_movie(title, client_id, year=None):
     _trakt_movie_cache[cache_key] = result
     return result
 
+def trakt_request_device_code(client_id):
+    """Starts the Trakt OAuth device-code flow, returning the dict with
+    device_code/user_code/verification_url/interval/expires_in."""
+    req = urllib.request.Request(
+        f'{TRAKT_API_URL}/oauth/device/code',
+        data=json.dumps({"client_id": client_id}).encode('utf-8'),
+        headers={'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0'},
+        method='POST'
+    )
+    with urllib.request.urlopen(req, timeout=5) as response:
+        return json.loads(response.read().decode('utf-8'))
+
+def trakt_poll_device_token(client_id, client_secret, device_code):
+    """Polls Trakt for the device-code flow result. Returns:
+    - dict with access_token/refresh_token on success
+    - {"pending": True} while the user hasn't authorized yet
+    - {"error": "..."} on failure/expiry"""
+    req = urllib.request.Request(
+        f'{TRAKT_API_URL}/oauth/device/token',
+        data=json.dumps({
+            "code": device_code,
+            "client_id": client_id,
+            "client_secret": client_secret
+        }).encode('utf-8'),
+        headers={'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0'},
+        method='POST'
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        if e.code == 400:
+            return {"pending": True}
+        return {"error": f"http_{e.code}"}
+    except Exception as e:
+        return {"error": str(e)}
+
 def rate_movie_on_trakt(client_id, access_token, trakt_id, rating):
     """Sends a rating (1-10) and marks a movie as watched 'now' on Trakt.tv."""
     headers = {
@@ -2617,6 +2654,58 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"success": True, "deleted_count": deleted_count, "deleted_files": deleted_files}).encode('utf-8'))
                 
+        elif url.path == '/api/trakt/device_code':
+            config = load_config()
+            client_id = config.get("trakt_client_id")
+
+            if not client_id:
+                self.send_response(400)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": False, "error": "missing_client_id"}).encode('utf-8'))
+            else:
+                try:
+                    result = trakt_request_device_code(client_id)
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"success": True, **result}).encode('utf-8'))
+                except Exception as e:
+                    print(f"[Trakt] Error requesting device code: {e}")
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode('utf-8'))
+
+        elif url.path == '/api/trakt/device_token':
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            params = json.loads(post_data.decode('utf-8'))
+            device_code = params.get('device_code')
+
+            config = load_config()
+            client_id = config.get("trakt_client_id")
+            client_secret = config.get("trakt_client_secret")
+
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+
+            if not (client_id and client_secret and device_code):
+                self.wfile.write(json.dumps({"success": False, "error": "missing_params"}).encode('utf-8'))
+            else:
+                result = trakt_poll_device_token(client_id, client_secret, device_code)
+                if result.get("access_token"):
+                    config["trakt_access_token"] = result["access_token"]
+                    if result.get("refresh_token"):
+                        config["trakt_refresh_token"] = result["refresh_token"]
+                    save_config(config)
+                    self.wfile.write(json.dumps({"success": True, "authorized": True}).encode('utf-8'))
+                elif result.get("pending"):
+                    self.wfile.write(json.dumps({"success": True, "authorized": False, "pending": True}).encode('utf-8'))
+                else:
+                    self.wfile.write(json.dumps({"success": False, "error": result.get("error", "unknown")}).encode('utf-8'))
+
         elif url.path == '/api/movies/rate':
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
@@ -2796,8 +2885,12 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                 config["movies_dir"] = params['movies_dir']
             if 'trakt_client_id' in params:
                 config["trakt_client_id"] = params['trakt_client_id']
+            if 'trakt_client_secret' in params:
+                config["trakt_client_secret"] = params['trakt_client_secret']
             if 'trakt_access_token' in params:
                 config["trakt_access_token"] = params['trakt_access_token']
+            if 'trakt_refresh_token' in params:
+                config["trakt_refresh_token"] = params['trakt_refresh_token']
 
             success = save_config(config)
             

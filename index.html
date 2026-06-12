@@ -1505,10 +1505,20 @@
                     </span>
                 </div>
 
-                <!-- Trakt Access Token -->
+                <!-- Trakt Client Secret -->
                 <div class="form-group" style="margin-bottom: 15px;">
-                    <label style="font-weight: 600; color: #fff;">2. Token d'accès Trakt :</label>
-                    <input type="password" id="trakt-access-token-input" class="form-control" placeholder="Collez votre token d'accès Trakt">
+                    <label style="font-weight: 600; color: #fff;">2. Client Secret Trakt :</label>
+                    <input type="password" id="trakt-client-secret-input" class="form-control" placeholder="Entrez le Client Secret de votre app Trakt">
+                </div>
+
+                <!-- Trakt Connect -->
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label style="font-weight: 600; color: #fff; display: flex; justify-content: space-between; align-items: center;">
+                        <span>3. Connexion :</span>
+                        <a href="#" id="connect-trakt-btn" onclick="connectTrakt(event)" style="font-size: 0.8rem; color: var(--accent-red); font-weight: bold; text-decoration: underline;">🔑 Connecter Trakt</a>
+                    </label>
+                    <input type="password" id="trakt-access-token-input" class="form-control" placeholder="Token d'accès (rempli automatiquement)" readonly>
+                    <span id="trakt-connect-status" style="font-size: 0.85rem; color: var(--text-muted); display: block; margin-top: 8px;"></span>
                 </div>
 
                 <div style="display: flex; gap: 12px; margin-top: 25px; justify-content: flex-end;">
@@ -3061,6 +3071,67 @@
             window.open(authUrl, '_blank');
         }
 
+        async function connectTrakt(event) {
+            event.preventDefault();
+            const statusEl = document.getElementById('trakt-connect-status');
+            const clientId = document.getElementById('trakt-client-id-input').value.trim();
+            const clientSecret = document.getElementById('trakt-client-secret-input').value.trim();
+
+            if (!clientId || !clientSecret) {
+                alert("Renseigne d'abord le Client ID et le Client Secret Trakt.");
+                return;
+            }
+
+            // Persist client_id/secret first so the backend can use them
+            await fetch('/api/launcher/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ trakt_client_id: clientId, trakt_client_secret: clientSecret })
+            });
+
+            try {
+                const res = await fetch('/api/trakt/device_code', { method: 'POST' });
+                const data = await res.json();
+                if (!data.success) {
+                    statusEl.innerText = `❌ Erreur : ${data.error}`;
+                    return;
+                }
+
+                statusEl.innerHTML = `Va sur <a href="${data.verification_url}" target="_blank" style="color: var(--accent-red);">${data.verification_url}</a> et entre le code : <strong>${data.user_code}</strong>`;
+
+                const deviceCode = data.device_code;
+                const interval = (data.interval || 5) * 1000;
+                const expiresAt = Date.now() + (data.expires_in || 600) * 1000;
+
+                const poll = async () => {
+                    if (Date.now() > expiresAt) {
+                        statusEl.innerText = '❌ Code expiré, réessaie.';
+                        return;
+                    }
+                    const tokenRes = await fetch('/api/trakt/device_token', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ device_code: deviceCode })
+                    });
+                    const tokenData = await tokenRes.json();
+                    if (tokenData.authorized) {
+                        statusEl.innerText = '✅ Connecté à Trakt !';
+                        const cfgRes = await fetch('/api/launcher/config');
+                        const cfg = await cfgRes.json();
+                        document.getElementById('trakt-access-token-input').value = cfg.trakt_access_token || '';
+                    } else if (tokenData.pending) {
+                        setTimeout(poll, interval);
+                    } else {
+                        statusEl.innerText = `❌ Erreur : ${tokenData.error}`;
+                    }
+                };
+                setTimeout(poll, interval);
+            } catch (err) {
+                console.error("Trakt device code flow failed:", err);
+                statusEl.innerText = '❌ Erreur de communication avec le serveur.';
+            }
+        }
+
         // ==========================================
         // CONFIG MODAL
         // ==========================================
@@ -3073,7 +3144,9 @@
                 document.getElementById('anilist-client-id-input').value = config.anilist_client_id || '';
                 document.getElementById('anilist-token-input').value = config.anilist_token || '';
                 document.getElementById('trakt-client-id-input').value = config.trakt_client_id || '';
+                document.getElementById('trakt-client-secret-input').value = config.trakt_client_secret || '';
                 document.getElementById('trakt-access-token-input').value = config.trakt_access_token || '';
+                document.getElementById('trakt-connect-status').innerText = config.trakt_access_token ? '✅ Connecté à Trakt' : '';
                 
                 // qBittorrent settings
                 const qbEnabled = config.qbittorrent_enabled || false;
@@ -3102,6 +3175,7 @@
             const clientId = document.getElementById('anilist-client-id-input').value.trim();
             const token = document.getElementById('anilist-token-input').value.trim();
             const traktClientId = document.getElementById('trakt-client-id-input').value.trim();
+            const traktClientSecret = document.getElementById('trakt-client-secret-input').value.trim();
             const traktAccessToken = document.getElementById('trakt-access-token-input').value.trim();
 
             const qbEnabled = document.getElementById('qbittorrent-enabled-input').checked;
@@ -3121,6 +3195,7 @@
                         anilist_client_id: clientId,
                         anilist_token: token,
                         trakt_client_id: traktClientId,
+                        trakt_client_secret: traktClientSecret,
                         trakt_access_token: traktAccessToken,
                         qbittorrent_enabled: qbEnabled,
                         qbittorrent_host: qbHost,
