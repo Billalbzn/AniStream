@@ -230,22 +230,25 @@ def _has_extension_after_match(title_lower, end_idx):
         return False
     return True
 
+def season_compatible(v, title, query_season=None):
+    """Checks whether the title's season (if indicated) matches the requested season.
+
+    `query_season` (derived from the full original query) takes precedence over
+    the season indicator (if any) found in `v` alone, since `v` may be a
+    simplified variation (e.g. "Enen no Shouboutai" from "Enen no Shouboutai:
+    Ni no Shou") that lost the season information. A query without any season
+    indicator defaults to season 1. A title without any season indicator is
+    assumed compatible."""
+    season_v = query_season if query_season is not None else (extract_season_number(v.lower()) or 1)
+    season_title = extract_season_number(title.lower())
+    return season_title is None or season_title == season_v
+
 def check_title_match(v, title, query_season=None):
     """Checks if the search variation v matches the torrent title with fallback rules."""
     title_lower = title.lower()
     v_lower = v.lower()
 
-    # Reject if the title explicitly indicates a different season than the one
-    # requested (e.g. searching "Fire Force" / season 1 shouldn't match
-    # "Fire Force S03..."). A query without any season indicator defaults to
-    # season 1. A title without any season indicator is assumed compatible.
-    # `query_season` (derived from the full original query) takes precedence
-    # over the season indicator (if any) found in `v` alone, since `v` may be
-    # a simplified variation (e.g. "Enen no Shouboutai" from "Enen no
-    # Shouboutai: Ni no Shou") that lost the season information.
-    season_v = query_season if query_season is not None else (extract_season_number(v_lower) or 1)
-    season_title = extract_season_number(title_lower)
-    if season_title is not None and season_title != season_v:
+    if not season_compatible(v, title, query_season):
         return False
 
     # 1. Try original exact word boundary, but reject if the matched title is
@@ -1913,6 +1916,12 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                     elif type_param == 'manual':
                         # For manual search, search exactly what the user typed
                         search_queries.append((v, v))
+                        # Also try a VOSTFR + season-tagged query, since the bare
+                        # title alone often surfaces unrelated/other-season
+                        # releases (e.g. "Enen no Shouboutai" alone returns mostly
+                        # Season 3 results on nyaa.si) while season 1 releases are
+                        # usually tagged "S01 VOSTFR".
+                        search_queries.append((v, f"{v} S{item_season:02d} VOSTFR"))
                     elif episode:
                         # Format episode as 2 digits (e.g. 05)
                         try:
@@ -1991,6 +2000,13 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                             
                         # Word boundary filter to prevent incorrect matches (e.g. Kaijin vs Kaiji)
                         if type_param != 'manual' and not check_title_match(v, title, query_season=query_seasons.get(v)):
+                            continue
+
+                        # Even for manual search, reject results for a clearly
+                        # different season than what was requested (e.g.
+                        # searching "Enen no Shouboutai" shouldn't return
+                        # "Fire Force S03..." results).
+                        if type_param == 'manual' and not season_compatible(v, title, query_season=query_seasons.get(v)):
                             continue
 
                         # If a specific episode was requested, reject titles for a
