@@ -92,18 +92,55 @@ def find_qbittorrent():
         return qb_in_path
     return None
 
+# Words/markers allowed to immediately follow a matched title in a torrent name
+# (season/episode/quality/release markers). Anything else (a plain word) is treated
+# as part of an extended/sequel title (e.g. "Shippuden", "Kai", "Brotherhood") and
+# causes the match to be rejected, so searching "Naruto" doesn't return
+# "Naruto Shippuden" results.
+_ALLOWED_FOLLOWUP_RE = re.compile(
+    r'^(?:s\d+e\d+|s\d+|e\d+|ep\d*|episode|saison|season|'
+    r'vostfr|vosta|vf|fr|multi|bd|web|webrip|bdrip|hdtv|'
+    r'\d{3,4}p|x264|x265|h264|h265|hevc|aac|flac|10bit|8bit)$'
+)
+
+def _has_extension_after_match(title_lower, end_idx):
+    """Returns True if the text right after a title match in `title_lower`
+    (starting at end_idx) looks like another title word (a sequel/extension name)
+    rather than an episode/season/quality marker or the end of the string."""
+    rest = title_lower[end_idx:]
+    # Skip leading separators (spaces, dashes, underscores, colons, dots)
+    m = re.match(r'^[\s\-_:.]*(.*)$', rest)
+    rest = m.group(1) if m else rest
+    if not rest:
+        return False
+    # Grab the next "word" (letters/digits)
+    word_match = re.match(r'^([A-Za-z0-9]+)', rest)
+    if not word_match:
+        return False
+    word = word_match.group(1)
+    if word.isdigit():
+        return False
+    if _ALLOWED_FOLLOWUP_RE.match(word):
+        return False
+    return True
+
 def check_title_match(v, title):
     """Checks if the search variation v matches the torrent title with fallback rules."""
-    # 1. Try original exact word boundary
-    pattern = r'\b' + re.escape(v.lower()) + r'\b'
-    if re.search(pattern, title.lower()):
+    title_lower = title.lower()
+    v_lower = v.lower()
+
+    # 1. Try original exact word boundary, but reject if the matched title is
+    # immediately followed by another title word (sequel/extension, e.g. "Shippuden")
+    pattern = r'\b' + re.escape(v_lower) + r'\b'
+    m = re.search(pattern, title_lower)
+    if m and not _has_extension_after_match(title_lower, m.end()):
         return True
-        
+
     # 2. Try matching with optional grammatical suffixes (ing, s, ed, er, ers) at the end of the query terms
-    words = re.findall(r'\b\w+\b', v.lower())
+    words = re.findall(r'\b\w+\b', v_lower)
     if not words:
         return False
-        
+
     pattern_parts = []
     for idx, w in enumerate(words):
         if idx == len(words) - 1:
@@ -111,17 +148,22 @@ def check_title_match(v, title):
             pattern_parts.append(re.escape(w) + r'(?:ing|s|ed|er|ers)?')
         else:
             pattern_parts.append(re.escape(w))
-            
+
     pattern_str = r'\b' + r'[\s\-_]*'.join(pattern_parts) + r'\b'
-    if re.search(pattern_str, title.lower()):
+    m2 = re.search(pattern_str, title_lower)
+    if m2 and not _has_extension_after_match(title_lower, m2.end()):
         return True
-        
-    # 3. Try ignoring all spaces and checking substring if query is long enough
-    norm_v = re.sub(r'[^a-z0-9]', '', v.lower())
-    norm_title = re.sub(r'[^a-z0-9]', '', title.lower())
+
+    # 3. Try ignoring all spaces and checking substring if query is long enough.
+    # Only allowed if the match reaches (close to) the end of the title's name part,
+    # i.e. not immediately followed by another title word.
+    norm_v = re.sub(r'[^a-z0-9]', '', v_lower)
+    norm_title = re.sub(r'[^a-z0-9]', '', title_lower)
     if len(norm_v) >= 7 and norm_v in norm_title:
-        return True
-        
+        idx = norm_title.index(norm_v) + len(norm_v)
+        if idx >= len(norm_title) or norm_title[idx].isdigit():
+            return True
+
     return False
 
 def is_french_subbed(title_lower, is_kai=False):
@@ -1375,7 +1417,20 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             if not query_text:
                 self.wfile.write(json.dumps([]).encode('utf-8'))
                 return
-                
+
+            # Allow free-text queries like "Naruto episode 5" / "Naruto ep 5" /
+            # "Naruto épisode 5" to specify the episode without a separate parameter.
+            ep_text_match = None
+            if type_param != 'manual':
+                ep_text_match = re.search(r'\s*(?:episode|épisode|ep)\s*0*(\d+)\s*$', query_text, re.IGNORECASE)
+            if ep_text_match:
+                if not episode:
+                    episode = ep_text_match.group(1)
+                query_text = query_text[:ep_text_match.start()].strip()
+                if not query_text:
+                    self.wfile.write(json.dumps([]).encode('utf-8'))
+                    return
+
             # Split by | to handle multiple title variations
             input_titles = [t.strip() for t in query_text.split('|') if t.strip()]
             
