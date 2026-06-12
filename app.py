@@ -12,6 +12,9 @@ import threading
 import time
 import re
 import http.cookiejar
+import csv
+import io
+from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
 
 # Avoid UnicodeEncodeError crashes when printing file paths containing accented
@@ -39,6 +42,10 @@ _animevost_cache_time = 0
 # In-memory cache of Trakt movie search results, keyed by (title.lower(), year)
 _trakt_movie_cache = {}
 
+# In-memory cache of Letterboxd user RSS feeds, keyed by lowercase username
+_letterboxd_rss_cache = {}
+LETTERBOXD_RSS_CACHE_TTL = 1800  # 30 minutes
+
 vlc_status_data = {
     "file_path": None,
     "state": "stopped",
@@ -52,6 +59,7 @@ vlc_status_data = {
     "anilist_synced": False,
     "is_movie": False,
     "movie_title": None,
+    "movie_year": None,
     "movie_trakt_id": None,
     "movie_rating_prompt": False,
     "movie_rated": False
@@ -1266,6 +1274,39 @@ def fetch_trakt_movie(title, client_id, year=None):
     _trakt_movie_cache[cache_key] = result
     return result
 
+def fetch_letterboxd_user_rss(username):
+    """Fetches and caches a Letterboxd user's public RSS feed (diary activity)."""
+    cache_key = username.lower()
+    now = time.time()
+    cached = _letterboxd_rss_cache.get(cache_key)
+    if cached and now - cached[0] < LETTERBOXD_RSS_CACHE_TTL:
+        return cached[1]
+
+    items = []
+    url = f'https://letterboxd.com/{urllib.parse.quote(username)}/rss/'
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            root = ET.fromstring(response.read())
+        for item in root.iter('item'):
+            entry = {"username": username}
+            for child in item:
+                tag = child.tag.split('}')[-1]
+                if tag in ('title', 'link', 'pubDate'):
+                    entry[tag] = child.text
+                elif tag == 'memberRating':
+                    entry['rating'] = child.text
+                elif tag == 'filmTitle':
+                    entry['film_title'] = child.text
+                elif tag == 'filmYear':
+                    entry['film_year'] = child.text
+            items.append(entry)
+    except Exception as e:
+        print(f"[Letterboxd] Error fetching RSS for '{username}': {e}")
+
+    _letterboxd_rss_cache[cache_key] = (now, items)
+    return items
+
 def trakt_request_device_code(client_id):
     """Starts the Trakt OAuth device-code flow, returning the dict with
     device_code/user_code/verification_url/interval/expires_in."""
@@ -1951,6 +1992,47 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                     print(f"[API] Error scanning movies library: {e}")
                     res = {"success": False, "movies_dir": movies_dir, "error": str(e)}
 
+            self.wfile.write(json.dumps(res).encode('utf-8'))
+
+        elif url.path == '/api/movies/export_letterboxd':
+            config = load_config()
+            ratings = config.get("letterboxd_ratings", [])
+
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(["Title", "Year", "Rating", "WatchedDate"])
+            for r in ratings:
+                writer.writerow([r.get("title", ""), r.get("year", ""), r.get("rating", ""), r.get("watched_date", "")])
+
+            csv_data = output.getvalue()
+            self.send_response(200)
+            self.send_header('Content-type', 'text/csv; charset=utf-8')
+            self.send_header('Content-Disposition', 'attachment; filename="letterboxd_import.csv"')
+            self.end_headers()
+            self.wfile.write(csv_data.encode('utf-8'))
+
+        elif url.path == '/api/letterboxd/friends_activity':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+
+            config = load_config()
+            friends_raw = config.get("letterboxd_friends", "")
+            usernames = [u.strip() for u in friends_raw.split(",") if u.strip()]
+
+            activity = []
+            for username in usernames:
+                activity.extend(fetch_letterboxd_user_rss(username)[:10])
+
+            def sort_key(entry):
+                try:
+                    return parsedate_to_datetime(entry.get("pubDate", ""))
+                except Exception:
+                    return datetime.min.replace(tzinfo=timezone.utc)
+
+            activity.sort(key=sort_key, reverse=True)
+
+            res = {"success": True, "activity": activity[:30]}
             self.wfile.write(json.dumps(res).encode('utf-8'))
 
         elif url.path == '/api/movies/recommendations':
@@ -2766,6 +2848,17 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             if rating and trakt_id and client_id and access_token:
                 success = rate_movie_on_trakt(client_id, access_token, trakt_id, rating)
 
+            if rating:
+                ratings = config.get("letterboxd_ratings", [])
+                ratings.append({
+                    "title": vlc_status_data.get("movie_title"),
+                    "year": vlc_status_data.get("movie_year"),
+                    "rating": round(rating / 2, 1),  # Trakt 1-10 -> Letterboxd 0.5-5 stars
+                    "watched_date": datetime.now().strftime('%Y-%m-%d')
+                })
+                config["letterboxd_ratings"] = ratings
+                save_config(config)
+
             vlc_status_data["movie_rating_prompt"] = False
             vlc_status_data["movie_rated"] = True
 
@@ -2827,14 +2920,17 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                             trakt_movie = fetch_trakt_movie(guessed_title, config_for_movies.get("trakt_client_id"), guessed_year)
                             if trakt_movie:
                                 vlc_status_data["movie_title"] = trakt_movie.get("title")
+                                vlc_status_data["movie_year"] = trakt_movie.get("year")
                                 vlc_status_data["movie_trakt_id"] = trakt_movie.get("ids", {}).get("trakt")
                             else:
                                 vlc_status_data["movie_title"] = guessed_title
+                                vlc_status_data["movie_year"] = guessed_year
                                 vlc_status_data["movie_trakt_id"] = None
 
                             subsequent_files = [file_path]
                         else:
                             vlc_status_data["movie_title"] = None
+                            vlc_status_data["movie_year"] = None
                             vlc_status_data["movie_trakt_id"] = None
 
                             # Resolve mal_id/episode number for automatic AniList progress sync
@@ -2935,6 +3031,8 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                 config["trakt_access_token"] = params['trakt_access_token']
             if 'trakt_refresh_token' in params:
                 config["trakt_refresh_token"] = params['trakt_refresh_token']
+            if 'letterboxd_friends' in params:
+                config["letterboxd_friends"] = params['letterboxd_friends']
 
             success = save_config(config)
             
