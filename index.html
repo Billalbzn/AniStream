@@ -29,12 +29,24 @@
             --radius-sm: 6px;
             --radius-md: 10px;
             --radius-lg: 14px;
+            --focus-ring: 0 0 0 3px rgba(90, 184, 255, 0.7);
         }
 
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
+        }
+
+        /* Keyboard focus indicator (only shown for keyboard navigation, not mouse) */
+        :focus-visible {
+            outline: none;
+            box-shadow: var(--focus-ring);
+            border-radius: var(--radius-sm);
+        }
+        /* Don't show the ring on plain mouse clicks */
+        :focus:not(:focus-visible) {
+            outline: none;
         }
 
         html {
@@ -1458,8 +1470,8 @@
         </ul>
         <div class="nav-actions">
             <div class="search-container" id="navbar-search-container">
-                <input type="text" id="search-input" class="search-input" placeholder="Rechercher un anime..." onkeydown="handleSearchKey(event)">
-                <button class="btn-search" onclick="triggerSearch()">🔍</button>
+                <input type="text" id="search-input" class="search-input" placeholder="Rechercher un anime..." aria-label="Rechercher un anime" onkeydown="handleSearchKey(event)">
+                <button class="btn-search" onclick="triggerSearch()" aria-label="Lancer la recherche">🔍</button>
             </div>
             <button class="btn-action" onclick="showConfigModal()">⚙️ Configurer</button>
             <button class="btn-action btn-action-primary" onclick="loadDashboard(true)">🔄 Rafraîchir</button>
@@ -1496,11 +1508,11 @@
         <div id="section-search" class="row" style="display: none;">
             <h2 class="row-title">Résultats de la recherche</h2>
             <div class="row-container">
-                <button class="slider-btn left-btn" onclick="scrollRow(this, -1)">‹</button>
+                <button class="slider-btn left-btn" onclick="scrollRow(this, -1)" aria-label="Défiler vers la gauche">‹</button>
                 <div id="row-search" class="row-posters">
                     <!-- Populated by JS -->
                 </div>
-                <button class="slider-btn right-btn" onclick="scrollRow(this, 1)">›</button>
+                <button class="slider-btn right-btn" onclick="scrollRow(this, 1)" aria-label="Défiler vers la droite">›</button>
             </div>
         </div>
 
@@ -1508,11 +1520,11 @@
         <div id="section-agenda" class="row" style="display: none;">
             <h2 class="row-title">📅 Agenda des Sorties <span id="agenda-count-badge"></span></h2>
             <div class="row-container">
-                <button class="slider-btn left-btn" onclick="scrollRow(this, -1)">‹</button>
+                <button class="slider-btn left-btn" onclick="scrollRow(this, -1)" aria-label="Défiler vers la gauche">‹</button>
                 <div id="row-agenda" class="agenda-strip">
                     <div class="loading-screen"><div class="spinner"></div></div>
                 </div>
-                <button class="slider-btn right-btn" onclick="scrollRow(this, 1)">›</button>
+                <button class="slider-btn right-btn" onclick="scrollRow(this, 1)" aria-label="Défiler vers la droite">›</button>
             </div>
         </div>
 
@@ -1534,11 +1546,11 @@
         <div id="section-continue" class="row" style="display: none;">
             <h2 class="row-title">Reprendre la lecture</h2>
             <div class="row-container">
-                <button class="slider-btn left-btn" onclick="scrollRow(this, -1)">‹</button>
+                <button class="slider-btn left-btn" onclick="scrollRow(this, -1)" aria-label="Défiler vers la gauche">‹</button>
                 <div id="row-continue" class="row-posters">
                     <!-- Populated by JS -->
                 </div>
-                <button class="slider-btn right-btn" onclick="scrollRow(this, 1)">›</button>
+                <button class="slider-btn right-btn" onclick="scrollRow(this, 1)" aria-label="Défiler vers la droite">›</button>
             </div>
         </div>
 
@@ -1546,11 +1558,11 @@
         <div id="section-watching-list" class="row" style="display: none;">
             <h2 class="row-title">▶️ En cours de lecture (AniList)</h2>
             <div class="row-container">
-                <button class="slider-btn left-btn" onclick="scrollRow(this, -1)">‹</button>
+                <button class="slider-btn left-btn" onclick="scrollRow(this, -1)" aria-label="Défiler vers la gauche">‹</button>
                 <div id="row-watching" class="row-posters">
                     <!-- Populated by JS -->
                 </div>
-                <button class="slider-btn right-btn" onclick="scrollRow(this, 1)">›</button>
+                <button class="slider-btn right-btn" onclick="scrollRow(this, 1)" aria-label="Défiler vers la droite">›</button>
             </div>
         </div>
 
@@ -1558,11 +1570,11 @@
         <div id="section-library" class="row">
             <h2 class="row-title">Ma Bibliothèque Locale</h2>
             <div class="row-container">
-                <button class="slider-btn left-btn" onclick="scrollRow(this, -1)">‹</button>
+                <button class="slider-btn left-btn" onclick="scrollRow(this, -1)" aria-label="Défiler vers la gauche">‹</button>
                 <div id="row-library" class="row-posters">
                     <div class="loading-screen"><div class="spinner"></div></div>
                 </div>
-                <button class="slider-btn right-btn" onclick="scrollRow(this, 1)">›</button>
+                <button class="slider-btn right-btn" onclick="scrollRow(this, 1)" aria-label="Défiler vers la droite">›</button>
             </div>
         </div>
 
@@ -1570,11 +1582,11 @@
         <div id="section-suggest" class="row">
             <h2 class="row-title">Recommandations Personnalisées (AniList)</h2>
             <div class="row-container">
-                <button class="slider-btn left-btn" onclick="scrollRow(this, -1)">‹</button>
+                <button class="slider-btn left-btn" onclick="scrollRow(this, -1)" aria-label="Défiler vers la gauche">‹</button>
                 <div id="row-suggest" class="row-posters">
                     <div class="loading-screen"><div class="spinner"></div></div>
                 </div>
-                <button class="slider-btn right-btn" onclick="scrollRow(this, 1)">›</button>
+                <button class="slider-btn right-btn" onclick="scrollRow(this, 1)" aria-label="Défiler vers la droite">›</button>
             </div>
         </div>
 
@@ -1582,11 +1594,11 @@
         <div id="section-planning" class="row" style="display: none;">
             <h2 class="row-title">📌 À Voir <span id="planning-count-badge" style="font-size:0.9rem; color:var(--text-muted); font-weight:400;"></span></h2>
             <div class="row-container">
-                <button class="slider-btn left-btn" onclick="scrollRow(this, -1)">‹</button>
+                <button class="slider-btn left-btn" onclick="scrollRow(this, -1)" aria-label="Défiler vers la gauche">‹</button>
                 <div id="row-planning" class="row-posters">
                     <div class="loading-screen"><div class="spinner"></div></div>
                 </div>
-                <button class="slider-btn right-btn" onclick="scrollRow(this, 1)">›</button>
+                <button class="slider-btn right-btn" onclick="scrollRow(this, 1)" aria-label="Défiler vers la droite">›</button>
             </div>
         </div>
     </div>
@@ -1608,9 +1620,9 @@
             <div id="section-movie-search" class="row" style="display: none;">
                 <h2 class="row-title">Résultats de recherche</h2>
                 <div class="row-container">
-                    <button class="slider-btn left-btn" onclick="scrollRow(this, -1)">‹</button>
+                    <button class="slider-btn left-btn" onclick="scrollRow(this, -1)" aria-label="Défiler vers la gauche">‹</button>
                     <div id="row-movie-search" class="row-posters"></div>
-                    <button class="slider-btn right-btn" onclick="scrollRow(this, 1)">›</button>
+                    <button class="slider-btn right-btn" onclick="scrollRow(this, 1)" aria-label="Défiler vers la droite">›</button>
                 </div>
             </div>
 
@@ -1621,11 +1633,11 @@
                     <a href="/api/movies/export_letterboxd" class="btn-action" style="text-decoration: none; height: fit-content;">📤 Exporter pour Letterboxd</a>
                 </div>
                 <div class="row-container">
-                    <button class="slider-btn left-btn" onclick="scrollRow(this, -1)">‹</button>
+                    <button class="slider-btn left-btn" onclick="scrollRow(this, -1)" aria-label="Défiler vers la gauche">‹</button>
                     <div id="row-movies" class="row-posters">
                         <div class="loading-screen"><div class="spinner"></div></div>
                     </div>
-                    <button class="slider-btn right-btn" onclick="scrollRow(this, 1)">›</button>
+                    <button class="slider-btn right-btn" onclick="scrollRow(this, 1)" aria-label="Défiler vers la droite">›</button>
                 </div>
             </div>
 
@@ -1633,11 +1645,11 @@
             <div id="section-movie-watchlist" class="row" style="display: none;">
                 <h2 class="row-title">🔖 Ma liste à voir (Trakt)</h2>
                 <div class="row-container">
-                    <button class="slider-btn left-btn" onclick="scrollRow(this, -1)">‹</button>
+                    <button class="slider-btn left-btn" onclick="scrollRow(this, -1)" aria-label="Défiler vers la gauche">‹</button>
                     <div id="row-movie-watchlist" class="row-posters">
                         <div class="loading-screen"><div class="spinner"></div></div>
                     </div>
-                    <button class="slider-btn right-btn" onclick="scrollRow(this, 1)">›</button>
+                    <button class="slider-btn right-btn" onclick="scrollRow(this, 1)" aria-label="Défiler vers la droite">›</button>
                 </div>
             </div>
 
@@ -1645,11 +1657,11 @@
             <div id="section-movie-recs" class="row" style="display: none;">
                 <h2 class="row-title">Recommandations (Trakt)</h2>
                 <div class="row-container">
-                    <button class="slider-btn left-btn" onclick="scrollRow(this, -1)">‹</button>
+                    <button class="slider-btn left-btn" onclick="scrollRow(this, -1)" aria-label="Défiler vers la gauche">‹</button>
                     <div id="row-movie-recs" class="row-posters">
                         <div class="loading-screen"><div class="spinner"></div></div>
                     </div>
-                    <button class="slider-btn right-btn" onclick="scrollRow(this, 1)">›</button>
+                    <button class="slider-btn right-btn" onclick="scrollRow(this, 1)" aria-label="Défiler vers la droite">›</button>
                 </div>
             </div>
 
@@ -1657,11 +1669,11 @@
             <div id="section-letterboxd-friends" class="row" style="display: none;">
                 <h2 class="row-title">🎞️ Activité de tes amis (Letterboxd)</h2>
                 <div class="row-container">
-                    <button class="slider-btn left-btn" onclick="scrollRow(this, -1)">‹</button>
+                    <button class="slider-btn left-btn" onclick="scrollRow(this, -1)" aria-label="Défiler vers la gauche">‹</button>
                     <div id="row-letterboxd-friends" class="row-posters">
                         <div class="loading-screen"><div class="spinner"></div></div>
                     </div>
-                    <button class="slider-btn right-btn" onclick="scrollRow(this, 1)">›</button>
+                    <button class="slider-btn right-btn" onclick="scrollRow(this, 1)" aria-label="Défiler vers la droite">›</button>
                 </div>
             </div>
         </div>
@@ -1670,8 +1682,8 @@
 
     <!-- DETAILED ANIME MODAL (NETFLIX STYLE POPUP) -->
     <div id="anime-modal-overlay" class="modal-overlay" onclick="closeAnimeModal(event)">
-        <div class="anime-modal" onclick="event.stopPropagation()">
-            <button class="btn-close-modal" onclick="closeAnimeModal()">×</button>
+        <div class="anime-modal" role="dialog" aria-modal="true" aria-label="Détails de l'anime" onclick="event.stopPropagation()">
+            <button class="btn-close-modal" onclick="closeAnimeModal()" aria-label="Fermer">×</button>
             <div id="modal-banner" class="modal-banner" style="background-image: url('');">
                 <div id="modal-banner-video-container" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: hidden; pointer-events: none; opacity: 0; transition: opacity 0.8s ease; z-index: 1;"></div>
                 <div class="modal-banner-content" style="position: absolute; bottom: 35px; left: 40px; z-index: 10; max-width: 80%; display: flex; flex-direction: column; gap: 15px;">
@@ -1684,7 +1696,7 @@
             </div>
             <div class="modal-body" style="margin-top: 0; padding: 30px 40px; display: flex; flex-direction: column; gap: 24px;">
                 <div class="modal-poster" style="display: none;">
-                    <img id="modal-poster-img" src="" alt="Poster">
+                    <img id="modal-poster-img" src="" alt="Affiche de l'anime">
                 </div>
                 <div class="modal-info-columns" style="display: flex; gap: 40px; flex-wrap: wrap; width: 100%;">
                     <div class="modal-info-left" style="flex: 1.8; min-width: 300px; display: flex; flex-direction: column; gap: 15px;">
@@ -1761,8 +1773,8 @@
 
     <!-- CONFIGURATION MODAL -->
     <div id="config-overlay" class="modal-overlay" onclick="closeConfigModal(event)">
-        <div class="anime-modal" style="max-width: 520px;" onclick="event.stopPropagation()">
-            <button class="btn-close-modal" onclick="closeConfigModal()">×</button>
+        <div class="anime-modal" style="max-width: 520px;" role="dialog" aria-modal="true" aria-label="Configuration" onclick="event.stopPropagation()">
+            <button class="btn-close-modal" onclick="closeConfigModal()" aria-label="Fermer">×</button>
             <div style="padding: 30px;">
                 <h2 style="font-size: 1.5rem; font-weight: 700; margin-bottom: 20px;">⚙️ Configuration</h2>
                 
@@ -1904,8 +1916,8 @@
 
     <!-- MOVIE MODAL -->
     <div id="movie-modal-overlay" class="modal-overlay" onclick="closeMovieModal(event)">
-        <div class="anime-modal" style="max-width: 520px;" onclick="event.stopPropagation()">
-            <button class="btn-close-modal" onclick="closeMovieModal()">×</button>
+        <div class="anime-modal" style="max-width: 520px;" role="dialog" aria-modal="true" aria-label="Détails du film" onclick="event.stopPropagation()">
+            <button class="btn-close-modal" onclick="closeMovieModal()" aria-label="Fermer">×</button>
             <div style="padding: 30px;">
                 <img id="movie-modal-poster" src="" alt="" style="display: none; width: 140px; border-radius: var(--radius-md); float: right; margin: 0 0 15px 15px;">
                 <h2 id="movie-modal-title" class="modal-title" style="font-size: 1.8rem; font-weight: 700; margin-bottom: 5px;">Titre</h2>
@@ -1931,7 +1943,7 @@
 
     <!-- MOVIE RATING POPUP -->
     <div id="movie-rating-overlay" class="modal-overlay">
-        <div class="anime-modal" style="max-width: 420px;" onclick="event.stopPropagation()">
+        <div class="anime-modal" style="max-width: 420px;" role="dialog" aria-modal="true" aria-label="Noter le film" onclick="event.stopPropagation()">
             <div style="padding: 30px; text-align: center;">
                 <h2 style="font-size: 1.4rem; font-weight: 700; margin-bottom: 10px;">🎬 Note ce film</h2>
                 <p id="movie-rating-title" style="color: var(--text-muted); margin-bottom: 20px;"></p>
@@ -2332,6 +2344,77 @@
             document.getElementById('navbar').classList.toggle('mobile-open');
             document.getElementById('nav-burger').classList.toggle('open');
         }
+
+        // ==========================================
+        // MODAL ACCESSIBILITY (keyboard + focus management)
+        // ==========================================
+        // Decoupled a11y layer: rather than editing every show/close function,
+        // a MutationObserver watches each overlay's visibility and a global
+        // keydown handler provides Escape-to-close and a Tab focus-trap.
+        const MODAL_OVERLAY_IDS = ['anime-modal-overlay', 'config-overlay', 'movie-modal-overlay', 'movie-rating-overlay'];
+        const MODAL_CLOSERS = {
+            'anime-modal-overlay': () => closeAnimeModal(),
+            'config-overlay': () => closeConfigModal(),
+            'movie-modal-overlay': () => closeMovieModal(),
+            'movie-rating-overlay': () => { document.getElementById('movie-rating-overlay').style.display = 'none'; }
+        };
+        let _modalLastFocus = null;
+
+        function getFocusableIn(el) {
+            return Array.from(el.querySelectorAll(
+                'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+            )).filter(n => n.offsetParent !== null);
+        }
+
+        function topmostOpenModal() {
+            for (let i = MODAL_OVERLAY_IDS.length - 1; i >= 0; i--) {
+                const el = document.getElementById(MODAL_OVERLAY_IDS[i]);
+                if (el && getComputedStyle(el).display !== 'none') return el;
+            }
+            return null;
+        }
+
+        // Track open/close to move focus into the dialog and restore it on close.
+        MODAL_OVERLAY_IDS.forEach(id => {
+            const overlay = document.getElementById(id);
+            if (!overlay) return;
+            let wasOpen = false;
+            const obs = new MutationObserver(() => {
+                const isOpen = getComputedStyle(overlay).display !== 'none';
+                if (isOpen && !wasOpen) {
+                    _modalLastFocus = document.activeElement;
+                    const focusables = getFocusableIn(overlay.querySelector('.anime-modal') || overlay);
+                    if (focusables.length) focusables[0].focus();
+                } else if (!isOpen && wasOpen) {
+                    if (_modalLastFocus && typeof _modalLastFocus.focus === 'function') _modalLastFocus.focus();
+                    _modalLastFocus = null;
+                }
+                wasOpen = isOpen;
+            });
+            obs.observe(overlay, { attributes: true, attributeFilter: ['style'] });
+        });
+
+        document.addEventListener('keydown', (e) => {
+            const modal = topmostOpenModal();
+            if (!modal) return;
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                const closer = MODAL_CLOSERS[modal.id];
+                if (closer) closer();
+            } else if (e.key === 'Tab') {
+                const focusables = getFocusableIn(modal.querySelector('.anime-modal') || modal);
+                if (!focusables.length) return;
+                const first = focusables[0];
+                const last = focusables[focusables.length - 1];
+                if (e.shiftKey && document.activeElement === first) {
+                    e.preventDefault();
+                    last.focus();
+                } else if (!e.shiftKey && document.activeElement === last) {
+                    e.preventDefault();
+                    first.focus();
+                }
+            }
+        });
 
         function showPage(page, event) {
             if (event) event.preventDefault();
@@ -2976,7 +3059,7 @@
                 card.onmouseenter = () => card.style.background = 'rgba(255,255,255,0.06)';
                 card.onmouseleave = () => card.style.background = 'transparent';
                 card.innerHTML = `
-                    <img src="${node.coverImage?.large || ''}" style="width: 40px; height: 56px; object-fit: cover; border-radius: 4px; flex-shrink: 0; background: #222;">
+                    <img src="${node.coverImage?.large || ''}" alt="" style="width: 40px; height: 56px; object-fit: cover; border-radius: 4px; flex-shrink: 0; background: #222;">
                     <div style="display: flex; flex-direction: column; min-width: 0;">
                         <span style="color: #fff; font-size: 0.9rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${title}</span>
                         <span style="font-size: 0.78rem; color: var(--text-muted);">${RELATION_TYPE_LABELS[edge.relationType]}</span>
@@ -3206,7 +3289,7 @@
                 const img = new Image();
                 img.onload = () => {
                     card.classList.remove('loading');
-                    card.innerHTML = `<img src="${posterUrl}" alt="Poster">` + card.innerHTML;
+                    card.innerHTML = `<img src="${posterUrl}" alt="Affiche de ${entry.title}">` + card.innerHTML;
                 };
                 img.src = posterUrl;
             } else {
@@ -3285,7 +3368,7 @@
                     card.classList.remove('loading');
                     card.innerHTML = `
                         ${badgeHtml}
-                        <img src="${posterUrl}" alt="Poster">
+                        <img src="${posterUrl}" alt="Affiche de ${item.folder_name}">
                         <div class="card-progress-bar">
                             <div class="card-progress-fill" style="width: ${percent}%"></div>
                         </div>
@@ -3329,7 +3412,7 @@
                 const img = new Image();
                 img.onload = () => {
                     card.classList.remove('loading');
-                    card.innerHTML = `<img src="${posterUrl}" alt="Poster">${rankBadge}`;
+                    card.innerHTML = `<img src="${posterUrl}" alt="Affiche de ${item.title}">${rankBadge}`;
                 };
                 img.src = posterUrl;
             } else {
