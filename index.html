@@ -4339,6 +4339,48 @@
             if (!e.target.closest('#navbar-search-container')) closeSearchSuggestions();
         });
 
+        // ==========================================
+        // KEYBOARD-NAVIGABLE POSTER CARDS
+        // ==========================================
+        // Poster cards are clickable <div>s. Rather than touching every render
+        // site, an observer makes each card focusable (tab stop + button role) and
+        // a delegated keydown handles Enter/Space (open) and Left/Right (move within
+        // the row). The :focus-visible ring already styles the focused card.
+        function _enhanceCard(card) {
+            if (card.dataset.kbd) return;
+            card.dataset.kbd = '1';
+            card.tabIndex = 0;
+            card.setAttribute('role', 'button');
+        }
+        const _cardObserver = new MutationObserver(muts => {
+            for (const m of muts) {
+                for (const n of m.addedNodes) {
+                    if (n.nodeType === 1 && n.classList && n.classList.contains('poster-card')) {
+                        _enhanceCard(n);
+                    }
+                }
+            }
+        });
+        _cardObserver.observe(document.body, { childList: true, subtree: true });
+
+        document.addEventListener('keydown', (e) => {
+            const el = document.activeElement;
+            if (!el || !el.classList || !el.classList.contains('poster-card')) return;
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                el.click();
+            } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                const dir = e.key === 'ArrowRight' ? 'nextElementSibling' : 'previousElementSibling';
+                let sib = el[dir];
+                while (sib && !(sib.classList && sib.classList.contains('poster-card'))) sib = sib[dir];
+                if (sib) {
+                    e.preventDefault();
+                    sib.focus();
+                    sib.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                }
+            }
+        });
+
         async function triggerSearch() {
             const queryInput = document.getElementById('search-input');
             const queryText = queryInput.value.trim();
