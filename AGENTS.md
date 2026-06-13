@@ -22,7 +22,7 @@ token to `:root` first, then reference it.
 |---|---|
 | `--bg-color`, `--bg-secondary`, `--card-bg` | page / section / card backgrounds |
 | `--surface-1`, `--surface-2`, `--surface-modal` | raised panels, shimmer, modal bg |
-| `--accent-red`, `--accent-red-hover`, `--accent-red-soft` | primary brand / CTAs |
+| `--accent`, `--accent-hover`, `--accent-soft` | primary brand / CTAs (Crunchyroll orange) |
 | `--accent-green`, `--accent-green-hover` | success / "completed" |
 | `--accent-blue`, `--accent-blue-soft` | info / secondary |
 | `--accent-gold` | ratings |
@@ -35,7 +35,7 @@ For any translucent color, compose with a `*-rgb` triplet token:
 background: rgba(var(--accent-red-rgb), 0.15);   /* ✅ */
 background: rgba(229, 9, 20, 0.15);               /* ❌ never */
 ```
-Available triplets: `--accent-red-rgb`, `--accent-green-rgb`,
+Available triplets: `--accent-rgb`, `--accent-green-rgb`,
 `--accent-blue-rgb`, `--white-rgb`, `--black-rgb`, `--bg-rgb`, `--grey-rgb`.
 
 ### Other tokens
