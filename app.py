@@ -165,8 +165,40 @@ def find_qbittorrent():
 _ALLOWED_FOLLOWUP_RE = re.compile(
     r'^(?:s\d+e\d+|s\d+|e\d+|ep\d*|episode|saison|season|'
     r'vostfr|vosta|vf|fr|multi|bd|web|webrip|bdrip|hdtv|'
+    r'kai|kaii|'  # "Kai"/"Kaï" = condensed re-edit of the SAME series (Dragon Ball Kai, Gintama Kaï)
     r'\d{3,4}p|x264|x265|h264|h265|hevc|aac|flac|10bit|8bit)$'
 )
+
+# Query words that describe the release, not the series — ignored when matching
+# a manual search query against torrent titles.
+_QUERY_NOISE_WORDS = {
+    'vostfr', 'vosta', 'vostf', 'vo', 'vf', 'fr', 'french', 'multi', 'sub', 'subs',
+    'bd', 'bluray', 'web', 'webrip', 'bdrip', 'hdtv', 'x264', 'x265', 'h264', 'h265',
+    'hevc', 'aac', 'flac', '10bit', '8bit', 'batch', 'integrale', 'intégrale',
+    '1080p', '720p', '480p', '2160p', '4k',
+}
+
+def manual_title_match(query, title):
+    """Recall-oriented match for MANUAL search.
+
+    The title must (a) lead with the query's first meaningful word (after any
+    "[release-group]" / "(group)" prefix) and (b) contain every meaningful word
+    of the query (release/quality words ignored). Unlike check_title_match it
+    does NOT reject titles where another word follows the name, so "Gintama"
+    surfaces "Gintama Kaï" and "Gintama - Mr. Ginpachi's Zany Class". The leading
+    check still rejects titles that merely mention the word elsewhere, e.g.
+    "Boruto Naruto Next Generations" for a "Naruto" search."""
+    q_tokens = [t for t in re.split(r'[^a-z0-9]+', query.lower())
+                if t and t not in _QUERY_NOISE_WORDS]
+    if not q_tokens:
+        return False
+    # Strip leading release-group tags like "[Triggerforce] " or "(ADN) ".
+    cleaned = re.sub(r'^\s*(?:[\[(][^\])]*[\])]\s*)+', '', title).lower()
+    title_words = [w for w in re.split(r'[^a-z0-9]+', cleaned) if w]
+    if not title_words or title_words[0] != q_tokens[0]:
+        return False
+    title_norm = re.sub(r'[^a-z0-9]+', ' ', title.lower())
+    return all(re.search(r'\b' + re.escape(t) + r'\b', title_norm) for t in q_tokens)
 
 # Japanese ordinal "part/season" markers used by sequels of the same series
 # (e.g. "Enen no Shouboutai: Ni no Shou" = Fire Force Season 2)
@@ -2093,9 +2125,15 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                         if season_pack and not is_season_pack(title):
                             continue
 
-                        # --- Strict name/season match against the requested series ---
+                        # --- Name/season match against the requested series ---
                         if type_param == 'kai':
                             strict_match = True
+                        elif type_param == 'manual':
+                            # Manual search favours recall: any title that leads with
+                            # the query (in a compatible season) is a real result; the
+                            # user picks from the list.
+                            strict_match = (manual_title_match(v, title)
+                                            and season_compatible(v, title, query_season=query_seasons.get(v)))
                         else:
                             strict_match = check_title_match(v, title, query_season=query_seasons.get(v))
 
@@ -2170,10 +2208,17 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
 
                 # The animevost feed isn't query-filtered (always the latest uploads),
                 # so always match the title against the requested anime.
-                strict_match = any(
-                    check_title_match(v, av_title, query_season=query_seasons.get(v))
-                    for v in all_variations
-                )
+                if type_param == 'manual':
+                    strict_match = any(
+                        manual_title_match(v, av_title)
+                        and season_compatible(v, av_title, query_season=query_seasons.get(v))
+                        for v in all_variations
+                    )
+                else:
+                    strict_match = any(
+                        check_title_match(v, av_title, query_season=query_seasons.get(v))
+                        for v in all_variations
+                    )
 
                 av_dict = {
                     "title": av_title,
@@ -2186,17 +2231,17 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                     "source": "animevost"
                 }
 
+                # Only keep genuine matches from the animevost feed. Its items are
+                # the latest uploads regardless of the query, so a non-match here is
+                # unrelated noise (Detective Conan, Iruma-kun, ...) — never surface
+                # those as an "approximate" fallback.
                 if strict_match:
                     seen_links.add(av_link)
                     results.append(av_dict)
-                elif matches_excluded(av_title):
-                    continue
-                elif av_link not in relaxed_seen:
-                    relaxed_seen.add(av_link)
-                    relaxed_results.append({**av_dict, "approximate": True})
 
             # Automatic fallback: if nothing matched strictly, surface the relaxed
-            # (approximate) candidates rather than showing an empty list.
+            # (approximate) candidates from nyaa (query-related) rather than an empty
+            # list.
             if not results and relaxed_results:
                 results = relaxed_results
 
