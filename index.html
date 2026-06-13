@@ -425,6 +425,64 @@
             border: 1px solid rgba(var(--white-rgb), 0.15);
         }
 
+        .hero-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 18px;
+            animation: heroTextIn 0.7s 0.25s var(--transition-smooth) both;
+        }
+        .hero-pill {
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--text-bright);
+            padding: 4px 11px;
+            border-radius: 20px;
+            background: rgba(var(--white-rgb), 0.08);
+            border: 1px solid rgba(var(--white-rgb), 0.12);
+            backdrop-filter: blur(4px);
+        }
+        .hero-pill--studio {
+            color: var(--accent-soft);
+            background: rgba(var(--accent-rgb), 0.12);
+            border-color: rgba(var(--accent-rgb), 0.3);
+        }
+
+        /* Crossfade layer between featured items (dip to background colour) */
+        .hero-fade {
+            position: absolute;
+            inset: 0;
+            background: var(--bg-color);
+            opacity: 0;
+            transition: opacity 0.4s ease;
+            z-index: 4;
+            pointer-events: none;
+        }
+
+        /* Featured-carousel dots */
+        .hero-dots {
+            display: flex;
+            gap: 8px;
+            margin-top: 22px;
+            animation: heroTextIn 0.7s 0.5s var(--transition-smooth) both;
+        }
+        .hero-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            border: none;
+            padding: 0;
+            cursor: pointer;
+            background: rgba(var(--white-rgb), 0.3);
+            transition: all 0.3s var(--transition-smooth);
+        }
+        .hero-dot.active {
+            background: var(--accent);
+            width: 26px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.6);
+        }
+
         .hero-synopsis {
             font-size: 1.1rem;
             line-height: 1.6;
@@ -1682,6 +1740,7 @@
     <!-- HERO BILLBOARD -->
     <div id="hero-banner" class="hero" style="background-image: url('');">
         <div id="hero-video-container" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: hidden; pointer-events: none; opacity: 0; transition: opacity 0.8s ease; z-index: 1;"></div>
+        <div id="hero-fade" class="hero-fade"></div>
         <div class="hero-content">
             <span class="hero-tagline">À ne pas rater</span>
             <h2 id="hero-title" class="hero-title">Chargement...</h2>
@@ -1691,10 +1750,13 @@
                 <span id="hero-meta-episodes" class="hero-meta-badge">Épisodes</span>
                 <span id="hero-meta-remaining" class="hero-meta-badge" style="display:none; background: rgba(var(--accent-rgb), 0.25); border-color: var(--accent); color: var(--white);">il reste 17 min</span>
             </div>
+            <div id="hero-pills" class="hero-pills"></div>
             <p id="hero-synopsis" class="hero-synopsis">Initialisation du catalogue local et récupération des données AniList en direct...</p>
             <div class="hero-actions">
                 <button id="hero-play-btn" class="btn-hero btn-hero-play" style="display:none;" onclick="">► Reprendre</button>
+                <button id="hero-details-btn" class="btn-hero btn-hero-info" onclick="">ℹ️ Détails</button>
             </div>
+            <div id="hero-dots" class="hero-dots"></div>
         </div>
     </div>
 
@@ -3318,6 +3380,7 @@
         function hoverHero(item) {
             if (leaveTimeout) clearTimeout(leaveTimeout);
             if (hoverTimeout) clearTimeout(hoverTimeout);
+            _heroFeatured.paused = true;   // don't rotate while previewing a hovered card
             hoverTimeout = setTimeout(() => {
                 setupHeroBanner(item, false);
             }, 250); // 250ms delay to prevent layout jitter on rapid swipe
@@ -3330,6 +3393,7 @@
                 if (defaultHeroItem) {
                     setupHeroBanner(defaultHeroItem, false);
                 }
+                _heroFeatured.paused = false;   // resume the carousel
             }, 800); // Revert to current watch status after 800ms of inactivity
         }
 
@@ -3418,6 +3482,22 @@
             playBtn.style.display = (heroPlayPath) ? 'flex' : 'none';
             playBtn.onclick = () => playEpisode(heroPlayPath);
 
+            // 5. Details button -> open the full modal for the current hero item
+            document.getElementById('hero-details-btn').onclick =
+                () => showAnimeModal(item.folder_name, false, item.mal_id);
+
+            // 5b. Genre / studio pills
+            const pills = document.getElementById('hero-pills');
+            if (data) {
+                const parts = (data.genres || []).slice(0, 3)
+                    .map(g => `<span class="hero-pill">${g}</span>`);
+                const studio = data.studios && data.studios.nodes && data.studios.nodes[0];
+                if (studio && studio.name) parts.push(`<span class="hero-pill hero-pill--studio">${studio.name}</span>`);
+                pills.innerHTML = parts.join('');
+            } else {
+                pills.innerHTML = '';
+            }
+
             // 6. Poster cover
             if (bannerUrl) {
                 document.getElementById('hero-banner').style.backgroundImage = `url('${bannerUrl}')`;
@@ -3440,6 +3520,80 @@
                 }, 2500);
             }
         }
+
+        // ==========================================
+        // FEATURED HERO CAROUSEL
+        // ==========================================
+        const _heroFeatured = { pool: [], idx: 0, timer: null, paused: false };
+
+        function _heroItemFromTrending(t) {
+            // Adapt a trending entry to the shape setupHeroBanner expects.
+            return {
+                folder_name: t.title, title: t.title, mal_id: t.mal_id,
+                files: [], total_files: 0, watched_episodes: 0,
+                next_episode_name: '', next_episode_path: null,
+            };
+        }
+
+        function startHeroCarousel(trendingItems) {
+            // Pool = current resting hero item + a few trending features (deduped).
+            const pool = [];
+            const seen = new Set();
+            if (defaultHeroItem) { pool.push(defaultHeroItem); if (defaultHeroItem.mal_id) seen.add(defaultHeroItem.mal_id); }
+            for (const t of trendingItems) {
+                if (pool.length >= 6) break;
+                if (t.mal_id && seen.has(t.mal_id)) continue;
+                if (t.mal_id) seen.add(t.mal_id);
+                pool.push(_heroItemFromTrending(t));
+            }
+            _heroFeatured.pool = pool;
+            _heroFeatured.idx = 0;
+            renderHeroDots();
+            _scheduleHeroRotation();
+        }
+
+        function _scheduleHeroRotation() {
+            if (_heroFeatured.timer) clearInterval(_heroFeatured.timer);
+            if (_heroFeatured.pool.length < 2) return;
+            _heroFeatured.timer = setInterval(() => {
+                if (_heroFeatured.paused) return;
+                advanceHero((_heroFeatured.idx + 1) % _heroFeatured.pool.length);
+            }, 9000);
+        }
+
+        async function advanceHero(idx) {
+            const fade = document.getElementById('hero-fade');
+            fade.style.opacity = '1';
+            await new Promise(r => setTimeout(r, 350));
+            _heroFeatured.idx = idx;
+            await setupHeroBanner(_heroFeatured.pool[idx], true);
+            renderHeroDots();
+            fade.style.opacity = '0';
+        }
+
+        function renderHeroDots() {
+            const dots = document.getElementById('hero-dots');
+            if (!dots) return;
+            if (_heroFeatured.pool.length < 2) { dots.innerHTML = ''; return; }
+            dots.innerHTML = _heroFeatured.pool.map((_, i) =>
+                `<button class="hero-dot ${i === _heroFeatured.idx ? 'active' : ''}" aria-label="Vedette ${i + 1}"></button>`
+            ).join('');
+            [...dots.children].forEach((d, i) => {
+                d.onclick = () => {
+                    if (i === _heroFeatured.idx) return;
+                    _scheduleHeroRotation();   // give the user the full interval on their pick
+                    advanceHero(i);
+                };
+            });
+        }
+
+        // Pause the carousel while the user is interacting with the hero.
+        (function setupHeroPause() {
+            const hero = document.getElementById('hero-banner');
+            if (!hero) return;
+            hero.addEventListener('mouseenter', () => { _heroFeatured.paused = true; });
+            hero.addEventListener('mouseleave', () => { _heroFeatured.paused = false; });
+        })();
 
         async function loadWatchingList() {
             const rowWatching = document.getElementById('row-watching');
@@ -3672,6 +3826,8 @@
                 row.innerHTML = '';
                 section.style.display = 'block';
                 items.slice(0, 10).forEach((it, i) => renderSuggestionCard(it, row, i, 10));
+                // Feed the featured hero carousel with the top trending entries.
+                startHeroCarousel(items.slice(0, 5));
             } catch (e) {
                 console.error('loadTrending failed:', e);
                 section.style.display = 'none';
