@@ -1163,6 +1163,57 @@
         .search-input::placeholder {
             color: rgba(var(--white-rgb), 0.5);
         }
+
+        /* Search-as-you-type suggestions dropdown */
+        .search-suggestions {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            width: 340px;
+            max-height: 72vh;
+            overflow-y: auto;
+            background: var(--surface-modal);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-md);
+            box-shadow: 0 16px 44px rgba(var(--black-rgb), 0.75);
+            z-index: 200;
+            padding: 6px;
+            display: none;
+        }
+        .search-suggestions.open { display: block; }
+        .search-suggestion {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 7px 8px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+        .search-suggestion:hover,
+        .search-suggestion.active {
+            background: rgba(var(--white-rgb), 0.08);
+        }
+        .search-suggestion img {
+            width: 34px;
+            height: 48px;
+            object-fit: cover;
+            border-radius: 4px;
+            flex-shrink: 0;
+            background: var(--surface-1);
+        }
+        .search-suggestion .ss-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--white);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .search-suggestion .ss-year {
+            font-weight: 400;
+            color: var(--text-muted);
+        }
         .btn-search {
             background: transparent;
             border: none;
@@ -1539,8 +1590,9 @@
         </ul>
         <div class="nav-actions">
             <div class="search-container" id="navbar-search-container">
-                <input type="text" id="search-input" class="search-input" placeholder="Rechercher un anime..." aria-label="Rechercher un anime" onkeydown="handleSearchKey(event)">
+                <input type="text" id="search-input" class="search-input" placeholder="Rechercher un anime..." aria-label="Rechercher un anime" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="search-suggestions" oninput="onSearchInput(event)" onkeydown="handleSearchKey(event)">
                 <button class="btn-search" onclick="triggerSearch()" aria-label="Lancer la recherche">🔍</button>
+                <div id="search-suggestions" class="search-suggestions" role="listbox" aria-label="Suggestions"></div>
             </div>
             <button class="btn-action" onclick="showConfigModal()">⚙️ Configurer</button>
             <button class="btn-action btn-action-primary" onclick="loadDashboard(true)">🔄 Rafraîchir</button>
@@ -4168,11 +4220,99 @@
         // ==========================================
         // SEARCH FUNCTIONALITY
         // ==========================================
+        // ==========================================
+        // SEARCH-AS-YOU-TYPE SUGGESTIONS
+        // ==========================================
+        let _suggestTimer = null;
+        let _suggestSeq = 0;          // guards against out-of-order async responses
+        let _suggestActiveIndex = -1;
+
+        function onSearchInput(event) {
+            const q = event.target.value.trim();
+            clearTimeout(_suggestTimer);
+            if (q.length < 2) { closeSearchSuggestions(); return; }
+            _suggestTimer = setTimeout(() => fetchSearchSuggestions(q), 250);
+        }
+
+        async function fetchSearchSuggestions(q) {
+            const seq = ++_suggestSeq;
+            const results = await searchAnimeAniList(q);
+            if (seq !== _suggestSeq) return;   // a newer keystroke superseded this one
+            renderSearchSuggestions((results || []).filter(r => r.idMal).slice(0, 8));
+        }
+
+        function renderSearchSuggestions(items) {
+            const box = document.getElementById('search-suggestions');
+            _suggestActiveIndex = -1;
+            if (!items.length) { closeSearchSuggestions(); return; }
+            box.innerHTML = '';
+            items.forEach(it => {
+                const title = it.title.english || it.title.romaji || '';
+                const year = it.seasonYear ? ` <span class="ss-year">· ${it.seasonYear}</span>` : '';
+                const cover = it.coverImage?.medium || '';
+                const el = document.createElement('div');
+                el.className = 'search-suggestion';
+                el.setAttribute('role', 'option');
+                el.innerHTML = `<img src="${cover}" alt=""><span class="ss-title">${title}${year}</span>`;
+                el.onclick = () => selectSuggestion(title, it.idMal);
+                box.appendChild(el);
+            });
+            box.classList.add('open');
+            document.getElementById('search-input').setAttribute('aria-expanded', 'true');
+        }
+
+        function selectSuggestion(title, malId) {
+            closeSearchSuggestions();
+            document.getElementById('search-input').value = '';
+            showAnimeModal(title, true, malId);
+        }
+
+        function closeSearchSuggestions() {
+            const box = document.getElementById('search-suggestions');
+            box.classList.remove('open');
+            box.innerHTML = '';
+            _suggestActiveIndex = -1;
+            document.getElementById('search-input').setAttribute('aria-expanded', 'false');
+        }
+
+        function _updateSuggestActive(items) {
+            items.forEach((el, i) => el.classList.toggle('active', i === _suggestActiveIndex));
+            if (_suggestActiveIndex >= 0) items[_suggestActiveIndex].scrollIntoView({ block: 'nearest' });
+        }
+
         function handleSearchKey(event) {
-            if (event.key === 'Enter') {
-                triggerSearch();
+            const box = document.getElementById('search-suggestions');
+            const open = box.classList.contains('open');
+            const items = open ? [...box.querySelectorAll('.search-suggestion')] : [];
+            if (open && event.key === 'ArrowDown') {
+                event.preventDefault();
+                _suggestActiveIndex = Math.min(_suggestActiveIndex + 1, items.length - 1);
+                _updateSuggestActive(items);
+            } else if (open && event.key === 'ArrowUp') {
+                event.preventDefault();
+                _suggestActiveIndex = Math.max(_suggestActiveIndex - 1, 0);
+                _updateSuggestActive(items);
+            } else if (event.key === 'Enter') {
+                event.preventDefault();
+                if (open && _suggestActiveIndex >= 0) {
+                    // Defer to the next tick: opening the modal moves focus to its
+                    // close button, and without this the Enter keyup would land on
+                    // that button and immediately close the modal again.
+                    const el = items[_suggestActiveIndex];
+                    setTimeout(() => el.click(), 0);
+                } else {
+                    closeSearchSuggestions();
+                    triggerSearch();
+                }
+            } else if (event.key === 'Escape') {
+                closeSearchSuggestions();
             }
         }
+
+        // Close the suggestions when clicking anywhere outside the search box.
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#navbar-search-container')) closeSearchSuggestions();
+        });
 
         async function triggerSearch() {
             const queryInput = document.getElementById('search-input');
@@ -4222,9 +4362,13 @@
                 media (search: $search, type: ANIME) {
                   id
                   idMal
+                  seasonYear
                   title {
                     romaji
                     english
+                  }
+                  coverImage {
+                    medium
                   }
                 }
               }
