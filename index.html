@@ -204,6 +204,7 @@
         }
 
         .nav-links li a {
+            position: relative;
             color: #e5e5e5;
             text-decoration: none;
             font-size: 0.95rem;
@@ -211,8 +212,24 @@
             transition: color 0.2s ease;
         }
 
+        .nav-links li a::after {
+            content: '';
+            position: absolute;
+            left: 0;
+            bottom: -6px;
+            width: 0;
+            height: 2px;
+            background: var(--accent-red);
+            box-shadow: 0 0 8px var(--accent-red-glow);
+            transition: width 0.3s var(--transition-smooth);
+        }
+
         .nav-links li a:hover {
             color: var(--accent-red);
+        }
+
+        .nav-links li a:hover::after {
+            width: 100%;
         }
 
         .nav-actions {
@@ -264,6 +281,12 @@
             align-items: center;
             padding: 0 4%;
             margin-bottom: -60px;
+            animation: heroPan 35s ease-in-out infinite alternate;
+        }
+
+        @keyframes heroPan {
+            0% { background-position: center 18%; background-size: 100%; }
+            100% { background-position: center 26%; background-size: 112%; }
         }
 
         .hero::before {
@@ -273,7 +296,9 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: linear-gradient(to right, rgba(17, 17, 17, 0.95) 0%, rgba(17, 17, 17, 0.45) 50%, transparent 100%);
+            background:
+                linear-gradient(to right, rgba(10, 10, 10, 0.97) 0%, rgba(10, 10, 10, 0.55) 45%, rgba(10, 10, 10, 0.15) 75%, transparent 100%),
+                linear-gradient(to top, rgba(10, 10, 10, 0.85) 0%, transparent 55%);
             z-index: 2;
         }
 
@@ -294,6 +319,11 @@
             z-index: 10;
         }
 
+        @keyframes heroTextIn {
+            from { opacity: 0; transform: translateY(28px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
         .hero-tagline {
             font-size: 0.85rem;
             color: var(--accent-red);
@@ -306,6 +336,7 @@
             border-radius: 4px;
             background: rgba(229, 9, 20, 0.1);
             border: 1px solid rgba(229, 9, 20, 0.25);
+            animation: heroTextIn 0.7s var(--transition-smooth) both;
         }
 
         .hero-title {
@@ -315,6 +346,7 @@
             margin-bottom: 20px;
             text-shadow: 3px 3px 6px rgba(0,0,0,0.9);
             letter-spacing: -0.5px;
+            animation: heroTextIn 0.7s 0.1s var(--transition-smooth) both;
         }
 
         .hero-meta-row {
@@ -324,6 +356,7 @@
             font-weight: 600;
             margin-bottom: 20px;
             align-items: center;
+            animation: heroTextIn 0.7s 0.2s var(--transition-smooth) both;
         }
 
         .hero-meta-score {
@@ -349,11 +382,13 @@
             -webkit-box-orient: vertical;
             overflow: hidden;
             font-weight: 300;
+            animation: heroTextIn 0.7s 0.3s var(--transition-smooth) both;
         }
 
         .hero-actions {
             display: flex;
             gap: 16px;
+            animation: heroTextIn 0.7s 0.4s var(--transition-smooth) both;
         }
 
         .btn-hero {
@@ -373,6 +408,22 @@
         .btn-hero-play {
             background: #ffffff;
             color: #000;
+            position: relative;
+            overflow: hidden;
+        }
+        .btn-hero-play::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -75%;
+            width: 50%;
+            height: 100%;
+            background: linear-gradient(120deg, transparent, rgba(229,9,20,0.35), transparent);
+            transform: skewX(-20deg);
+            transition: left 0.6s ease;
+        }
+        .btn-hero-play:hover::before {
+            left: 125%;
         }
         .btn-hero-play:hover {
             background: rgba(255, 255, 255, 0.85);
@@ -512,7 +563,7 @@
         .poster-card:hover {
             transform: scale(1.12) translateY(-12px);
             z-index: 50;
-            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9), 
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9),
                         0 0 30px rgba(229, 9, 20, 0.2),
                         inset 0 0 0 1px rgba(229, 9, 20, 0.3);
             border-color: rgba(229, 9, 20, 0.5);
@@ -526,7 +577,48 @@
         }
 
         .poster-card:hover img {
-            filter: brightness(1.05);
+            filter: brightness(0.75);
+        }
+
+        /* Darkening gradient + play-button overlay on hover, Crunchyroll-style */
+        .poster-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to top, rgba(0,0,0,0.65) 0%, transparent 55%);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            z-index: 12;
+            pointer-events: none;
+        }
+        .poster-card:hover::before {
+            opacity: 1;
+        }
+
+        .poster-card::after {
+            content: '▶';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(229, 9, 20, 0.9);
+            color: #fff;
+            font-size: 1.3rem;
+            box-shadow: 0 0 30px rgba(229, 9, 20, 0.6);
+            transform: translate(-50%, -50%) scale(0.4);
+            opacity: 0;
+            transition: all 0.35s var(--transition-smooth);
+            z-index: 20;
+            pointer-events: none;
+        }
+        .poster-card:hover::after {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
         }
 
         /* PROGRESS BAR IN POSTER CARD */
@@ -545,6 +637,26 @@
             background-color: var(--accent-red);
             width: 0%;
             box-shadow: 0 0 10px var(--accent-red);
+        }
+
+        /* Big outlined ranking number for "Top 5" style rows (Crunchyroll trending) */
+        .rank-badge {
+            position: absolute;
+            bottom: -10px;
+            left: -6px;
+            font-size: 4rem;
+            font-weight: 800;
+            line-height: 1;
+            color: transparent;
+            -webkit-text-stroke: 2px rgba(255, 255, 255, 0.9);
+            text-shadow: 0 6px 16px rgba(0,0,0,0.85);
+            z-index: 14;
+            font-family: 'Outfit', sans-serif;
+            pointer-events: none;
+            transition: transform 0.4s var(--transition-smooth);
+        }
+        .poster-card:hover .rank-badge {
+            transform: translateY(-6px) scale(1.05);
         }
 
         .card-title-fallback {
@@ -2668,7 +2780,7 @@
                 rowSuggest.innerHTML = '';
                 const limit = Math.min(20, suggestionsData.length);
                 for (let i = 0; i < limit; i++) {
-                    renderSuggestionCard(suggestionsData[i], rowSuggest);
+                    renderSuggestionCard(suggestionsData[i], rowSuggest, i);
                 }
             } catch (err) {
                 console.error("Failed to load suggestions", err);
@@ -3185,10 +3297,12 @@
             }
         }
 
-        async function renderSuggestionCard(item, container) {
+        async function renderSuggestionCard(item, container, index = -1) {
             const card = document.createElement('div');
             card.className = 'poster-card loading';
             card.onclick = () => showAnimeModal(item.title, true, item.mal_id);
+
+            const rankBadge = (index >= 0 && index < 5) ? `<div class="rank-badge">${index + 1}</div>` : '';
 
             // Hover sync for suggestions
             const mockItem = {
@@ -3206,6 +3320,7 @@
 
             card.innerHTML = `
                 <div class="card-title-fallback">${item.title}</div>
+                ${rankBadge}
             `;
             container.appendChild(card);
 
@@ -3214,7 +3329,7 @@
                 const img = new Image();
                 img.onload = () => {
                     card.classList.remove('loading');
-                    card.innerHTML = `<img src="${posterUrl}" alt="Poster">`;
+                    card.innerHTML = `<img src="${posterUrl}" alt="Poster">${rankBadge}`;
                 };
                 img.src = posterUrl;
             } else {
