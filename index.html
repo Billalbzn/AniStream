@@ -558,6 +558,11 @@
             display: none; /* Clean Netflix look */
         }
 
+        /* Ranked rows (Top 10): leave room so the first big number isn't clipped */
+        .row-posters--ranked {
+            padding-left: 26px;
+        }
+
         /* SLIDE BUTTONS */
         .slider-btn {
             position: absolute;
@@ -1745,6 +1750,18 @@
             </div>
         </div>
 
+        <!-- ROW: TOP 10 TRENDING (AniList) -->
+        <div id="section-trending" class="row" style="display: none;">
+            <h2 class="row-title">🔥 Top 10 cette semaine</h2>
+            <div class="row-container">
+                <button class="slider-btn left-btn" onclick="scrollRow(this, -1)" aria-label="Défiler vers la gauche">‹</button>
+                <div id="row-trending" class="row-posters row-posters--ranked">
+                    <!-- Populated by JS -->
+                </div>
+                <button class="slider-btn right-btn" onclick="scrollRow(this, 1)" aria-label="Défiler vers la droite">›</button>
+            </div>
+        </div>
+
         <!-- ROW: EN COURS (AniList "watching" list, click to open + install missing episodes) -->
         <div id="section-watching-list" class="row" style="display: none;">
             <h2 class="row-title">▶️ En cours de lecture (AniList)</h2>
@@ -2656,6 +2673,7 @@
             loadWatchingList();  // don't await — runs in parallel
             loadAgenda();        // don't await — runs in parallel
             loadPlanning();      // don't await — runs in parallel
+            loadTrending();      // don't await — runs in parallel
         }
 
         // ==========================================
@@ -3571,12 +3589,12 @@
             }
         }
 
-        async function renderSuggestionCard(item, container, index = -1) {
+        async function renderSuggestionCard(item, container, index = -1, rankLimit = 5) {
             const card = document.createElement('div');
             card.className = 'poster-card loading';
             card.onclick = () => showAnimeModal(item.title, true, item.mal_id);
 
-            const rankBadge = (index >= 0 && index < 5) ? `<div class="rank-badge">${index + 1}</div>` : '';
+            const rankBadge = (index >= 0 && index < rankLimit) ? `<div class="rank-badge">${index + 1}</div>` : '';
 
             // Hover sync for suggestions
             const mockItem = {
@@ -3608,6 +3626,55 @@
                 img.src = posterUrl;
             } else {
                 card.classList.remove('loading');
+            }
+        }
+
+        // ==========================================
+        // TOP 10 TRENDING (AniList)
+        // ==========================================
+        async function fetchTrendingAnime() {
+            const query = `
+            query {
+              Page(page: 1, perPage: 10) {
+                media(sort: TRENDING_DESC, type: ANIME) {
+                  idMal
+                  title { romaji english }
+                  coverImage { large }
+                }
+              }
+            }`;
+            try {
+                const r = await fetch('https://graphql.anilist.co', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify({ query })
+                });
+                if (r.ok) { const j = await r.json(); return j.data?.Page?.media || []; }
+            } catch (e) {
+                console.error('[AniList] trending query failed:', e);
+            }
+            return [];
+        }
+
+        async function loadTrending() {
+            const section = document.getElementById('section-trending');
+            const row = document.getElementById('row-trending');
+            try {
+                const media = await fetchTrendingAnime();
+                const items = media
+                    .filter(m => m.idMal)
+                    .map(m => ({
+                        title: m.title.english || m.title.romaji,
+                        mal_id: m.idMal,
+                        cover_image: m.coverImage?.large || ''
+                    }));
+                if (!items.length) { section.style.display = 'none'; return; }
+                row.innerHTML = '';
+                section.style.display = 'block';
+                items.slice(0, 10).forEach((it, i) => renderSuggestionCard(it, row, i, 10));
+            } catch (e) {
+                console.error('loadTrending failed:', e);
+                section.style.display = 'none';
             }
         }
 
