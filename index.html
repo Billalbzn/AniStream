@@ -3843,6 +3843,22 @@
         // ==========================================
         // TORRENT & DOWNLOAD FUNCTIONS
         // ==========================================
+        // Build the "exclude" query param from AniList relations of `data`:
+        // titles of related-but-different entries (sequels/spin-offs/prequels)
+        // so e.g. searching "Naruto" doesn't return "Boruto: Naruto Next Generations".
+        function buildExcludeParam(data) {
+            if (!data || !data.relations || !data.relations.edges) return '';
+            const titles = [];
+            for (const edge of data.relations.edges) {
+                const node = edge.node;
+                if (!node || node.type !== 'ANIME') continue;
+                for (const t of [node.title?.romaji, node.title?.english]) {
+                    if (t && !titles.includes(t)) titles.push(t);
+                }
+            }
+            return titles.join('|');
+        }
+
         async function searchTorrentsNyaa(quiet = false) {
             const queryInput = document.getElementById('torrent-search-input');
             const queryText = queryInput.value.trim();
@@ -3867,15 +3883,26 @@
                 }
             }
             const searchQuery = titleVariations.join('|');
+            const excludeParam = buildExcludeParam(d);
 
             try {
-                const res = await fetch(`/api/torrent/search?query=${encodeURIComponent(searchQuery)}&type=manual`);
+                let url = `/api/torrent/search?query=${encodeURIComponent(searchQuery)}&type=manual`;
+                if (excludeParam) url += `&exclude=${encodeURIComponent(excludeParam)}`;
+                const res = await fetch(url);
                 const torrents = await res.json();
 
                 listContainer.innerHTML = '';
                 if (torrents.length === 0) {
                     listContainer.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem; font-style: italic; margin: 0;">Aucun torrent trouvé sur Nyaa.si.</p>';
                     return;
+                }
+
+                // Warn when results are only approximate (strict matching found nothing).
+                if (torrents.some(t => t.approximate)) {
+                    const warn = document.createElement('p');
+                    warn.style = 'color: #f5a623; font-size: 0.85rem; margin: 0 0 8px 0;';
+                    warn.textContent = '⚠️ Résultats approximatifs (aucune correspondance exacte trouvée) — vérifie le titre.';
+                    listContainer.appendChild(warn);
                 }
 
                 torrents.forEach(t => {
@@ -4002,6 +4029,8 @@
 
             const animeTitle = detailedData.title.english || detailedData.title.romaji;
             const missingCount = endEp - startEp + 1;
+            const excludeParam = buildExcludeParam(detailedData);
+            const excludeQs = excludeParam ? `&exclude=${encodeURIComponent(excludeParam)}` : '';
 
             // When catching up on many episodes, a whole-season pack is far more
             // reliable than fetching each episode individually (some seasons are
@@ -4009,7 +4038,7 @@
             if (missingCount >= 3) {
                 try {
                     alertToast(`🔍 Recherche du pack de la saison (${missingCount} épisodes manquants)...`);
-                    const packRes = await fetch(`/api/torrent/search?query=${encodeURIComponent(queryText)}&season_pack=1`);
+                    const packRes = await fetch(`/api/torrent/search?query=${encodeURIComponent(queryText)}&season_pack=1${excludeQs}`);
                     const packs = await packRes.json();
                     if (packs && packs.length > 0) {
                         const best = packs[0];
@@ -4028,7 +4057,7 @@
             for (let ep = startEp; ep <= endEp; ep++) {
                 try {
                     alertToast(`🔍 Recherche de l'épisode ${ep}/${endEp}...`);
-                    const res = await fetch(`/api/torrent/search?query=${encodeURIComponent(queryText)}&episode=${ep}`);
+                    const res = await fetch(`/api/torrent/search?query=${encodeURIComponent(queryText)}&episode=${ep}${excludeQs}`);
                     const torrents = await res.json();
                     if (torrents && torrents.length > 0) {
                         const bestTorrent = torrents[0];

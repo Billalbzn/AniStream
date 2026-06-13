@@ -288,12 +288,16 @@ def season_compatible(v, title, query_season=None):
     season_title = extract_season_number(title.lower())
     return season_title is None or season_title == season_v
 
-def check_title_match(v, title, query_season=None):
-    """Checks if the search variation v matches the torrent title with fallback rules."""
+def check_title_match(v, title, query_season=None, ignore_season=False):
+    """Checks if the search variation v matches the torrent title with fallback rules.
+
+    When `ignore_season` is True, the season guard is skipped and only the
+    name-matching rules apply (used to decide whether a result belongs to a
+    given series regardless of which season it is, e.g. for exclusion)."""
     title_lower = title.lower()
     v_lower = v.lower()
 
-    if not season_compatible(v, title, query_season):
+    if not ignore_season and not season_compatible(v, title, query_season):
         return False
 
     # 1. Try original exact word boundary, but reject if the matched title is
@@ -316,7 +320,7 @@ def check_title_match(v, title, query_season=None):
         else:
             pattern_parts.append(re.escape(w))
 
-    pattern_str = r'\b' + r'[\s\-_]*'.join(pattern_parts) + r'\b'
+    pattern_str = r'\b' + r'[\s\-_.]*'.join(pattern_parts) + r'\b'
     m2 = re.search(pattern_str, title_lower)
     if m2 and not _has_extension_after_match(title_lower, m2.end()):
         return True
@@ -1905,6 +1909,11 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             # season_pack=1 -> look for a whole-season pack/batch instead of a
             # single episode (used when catching up on many missing episodes).
             season_pack = query_parsed.get('season_pack', ['0'])[0] in ('1', 'true')
+            # exclude=Title A|Title B -> titles of related-but-different entries
+            # (sequels/spin-offs from AniList relations, e.g. "Boruto: Naruto Next
+            # Generations" when searching "Naruto") whose results must be filtered out.
+            exclude_text = query_parsed.get('exclude', [''])[0]
+            exclude_titles = [t.strip() for t in exclude_text.split('|') if t.strip()]
 
             if not query_text:
                 self.wfile.write(json.dumps([]).encode('utf-8'))
@@ -2004,7 +2013,21 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             # Perform RSS fetches
             results = []
             seen_magnets = set()
-            
+            # Relaxed tier: candidates that passed the hard filters (French sub,
+            # episode/pack, not an excluded related series) but failed the strict
+            # name/season match. Shown only as an automatic fallback when the
+            # strict results are empty (flagged "approximate" so the UI can warn).
+            relaxed_results = []
+            relaxed_seen = set()
+
+            def matches_excluded(title):
+                """True if the title belongs to a related-but-different entry
+                (e.g. "Boruto: Naruto Next Generations" when searching "Naruto")."""
+                return any(
+                    check_title_match(ex, title, ignore_season=True)
+                    for ex in exclude_titles
+                )
+
             for v, q in search_queries:
                 url_q = urllib.parse.urlencode({
                     "page": "rss",
@@ -2048,29 +2071,18 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                         if not magnet:
                             continue
                             
-                        if magnet in seen_magnets:
+                        if magnet in seen_magnets or magnet in relaxed_seen:
                             continue
-                            
+
+                        # --- Hard filters (apply to strict AND relaxed tiers) ---
                         # Strictly enforce French subbed/VOSTFR (more permissive for Kaï)
                         if not is_french_subbed(title.lower(), is_kai=(type_param == 'kai')):
                             continue
 
                         # If type=kai is requested, enforce that the title contains Kai keywords
                         if type_param == 'kai':
-                            title_lower = title.lower()
-                            if not any(kw in title_lower for kw in KAI_KEYWORDS):
+                            if not any(kw in title.lower() for kw in KAI_KEYWORDS):
                                 continue
-                            
-                        # Word boundary filter to prevent incorrect matches (e.g. Kaijin vs Kaiji)
-                        if type_param != 'manual' and not check_title_match(v, title, query_season=query_seasons.get(v)):
-                            continue
-
-                        # Even for manual search, reject results for a clearly
-                        # different season than what was requested (e.g.
-                        # searching "Enen no Shouboutai" shouldn't return
-                        # "Fire Force S03..." results).
-                        if type_param == 'manual' and not season_compatible(v, title, query_season=query_seasons.get(v)):
-                            continue
 
                         # If a specific episode was requested, reject titles for a
                         # different episode/season (e.g. "episode 1" matching "season 4")
@@ -2081,8 +2093,13 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                         if season_pack and not is_season_pack(title):
                             continue
 
-                        seen_magnets.add(magnet)
-                        results.append({
+                        # --- Strict name/season match against the requested series ---
+                        if type_param == 'kai':
+                            strict_match = True
+                        else:
+                            strict_match = check_title_match(v, title, query_season=query_seasons.get(v))
+
+                        result_dict = {
                             "title": title,
                             "magnet": magnet,
                             "torrent_url": link,
@@ -2091,7 +2108,22 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                             "seeders": int(seeders) if seeders.isdigit() else 0,
                             "leechers": int(leechers) if leechers.isdigit() else 0,
                             "source": "nyaa"
-                        })
+                        }
+
+                        if strict_match:
+                            # A genuine match for the requested series is always kept,
+                            # even if its name overlaps an excluded relative.
+                            seen_magnets.add(magnet)
+                            results.append(result_dict)
+                        elif matches_excluded(title):
+                            # Belongs to a related-but-different entry (e.g. Boruto
+                            # when searching Naruto) -> drop it entirely.
+                            continue
+                        else:
+                            # Doesn't clearly match the series nor a known relative:
+                            # keep as an approximate fallback only.
+                            relaxed_seen.add(magnet)
+                            relaxed_results.append({**result_dict, "approximate": True})
                 except Exception as e:
                     print(f"[Nyaa] Error searching for {q}: {e}")
 
@@ -2130,19 +2162,20 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                     if not any(kw in av_title_lower for kw in KAI_KEYWORDS):
                         continue
 
-                # The animevost feed isn't query-filtered (always the latest uploads), so always
-                # match the title against the requested anime, even for manual search.
-                if not any(check_title_match(v, av_title, query_season=query_seasons.get(v)) for v in all_variations):
-                    continue
-
                 if ep_int is not None and not episode_matches(av_title, ep_int):
                     continue
 
                 if season_pack and not is_season_pack(av_title):
                     continue
 
-                seen_links.add(av_link)
-                results.append({
+                # The animevost feed isn't query-filtered (always the latest uploads),
+                # so always match the title against the requested anime.
+                strict_match = any(
+                    check_title_match(v, av_title, query_season=query_seasons.get(v))
+                    for v in all_variations
+                )
+
+                av_dict = {
                     "title": av_title,
                     "magnet": None,
                     "torrent_url": av_link,
@@ -2151,7 +2184,21 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                     "seeders": 0,
                     "leechers": 0,
                     "source": "animevost"
-                })
+                }
+
+                if strict_match:
+                    seen_links.add(av_link)
+                    results.append(av_dict)
+                elif matches_excluded(av_title):
+                    continue
+                elif av_link not in relaxed_seen:
+                    relaxed_seen.add(av_link)
+                    relaxed_results.append({**av_dict, "approximate": True})
+
+            # Automatic fallback: if nothing matched strictly, surface the relaxed
+            # (approximate) candidates rather than showing an empty list.
+            if not results and relaxed_results:
+                results = relaxed_results
 
             # Sort by seeders descending; in season-pack mode, prefer packs first.
             if season_pack:
