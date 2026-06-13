@@ -1,7 +1,8 @@
-name: Design-System Health (Lyse)
+name: CI (Lyse score + tests)
 
-# Guards against design-system drift: fails the build if the deterministic
-# health score drops below the floor defined in tools/lyse_score.py.
+# Guards against drift: fails the build if the deterministic design-system
+# health score drops below the floor (tools/lyse_score.py) or if the
+# title-matching unit tests regress.
 
 on:
   push:
@@ -9,12 +10,14 @@ on:
   pull_request:
 
 jobs:
-  lyse-score:
+  checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Run matching-logic tests
+        run: python -m unittest discover -s tests -v
       - name: Run design-system health score
         run: python tools/lyse_score.py

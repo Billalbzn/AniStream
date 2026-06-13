@@ -93,11 +93,14 @@ scripts read/write it directly.
 python app.py                 # serves http://localhost:8000 (loopback only)
 python tools/lyse_score.py     # deterministic design-system health score /100
 ```
-Before committing a UI change, run `lyse_score.py` — **the score must not go
-down.** CI runs it on every PR (`.github/workflows/lyse.yml`).
+Before committing, run `python -m unittest discover -s tests` (covers the
+title-matching logic) and `lyse_score.py` — **neither may regress**; the score
+must not go down. CI runs both on every PR (`.github/workflows/lyse.yml`).
 
-There is no formal test suite; `scratch/` and root `test_*.py` are ad-hoc and
-git-ignored. Verify UI changes by running the app and looking at it.
+When you change matching logic in `app.py` (`check_title_match`,
+`manual_title_match`, season/episode parsing), add or update a case in
+`tests/test_matching.py`. The ad-hoc `scratch/` and root `test_*.py` scripts are
+git-ignored experiments, not the suite. Verify UI changes by running the app.
 
 ---
 
