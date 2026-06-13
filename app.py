@@ -2714,7 +2714,18 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(planning_list).encode('utf-8'))
 
         else:
-            # Fallback to serving local static files if needed
+            # Fallback to serving local static files if needed. Block files that
+            # contain secrets or private data — the static handler serves from the
+            # working directory, which holds config.json (tokens/passwords), the
+            # MAL export and the recommendation caches.
+            normalized = os.path.normpath(urllib.parse.unquote(url.path)).replace('\\', '/').lstrip('/')
+            blocked_names = {'config.json', 'config.example.json', 'myanimelist.xml',
+                             'recommendations_cache.json'}
+            base = os.path.basename(normalized).lower()
+            if (base in blocked_names or base.endswith('.json') or base.endswith('.xml')
+                    or base.endswith('.py') or base.endswith('.log')):
+                self.send_error(403, "Forbidden")
+                return
             super().do_GET()
 
     def do_POST(self):
@@ -3611,7 +3622,10 @@ def main():
     httpd = None
     for attempt in range(5):
         try:
-            httpd = socketserver.TCPServer(("", PORT), MyHandler)
+            # Bind to loopback only: the server exposes credentials (AniList
+            # token, qBittorrent password) and local file access, so it must
+            # never be reachable from other machines on the network.
+            httpd = socketserver.TCPServer(("127.0.0.1", PORT), MyHandler)
             break
         except OSError as e:
             if attempt == 4:
