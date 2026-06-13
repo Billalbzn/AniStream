@@ -1814,7 +1814,7 @@
                     <!-- Quick Actions -->
                     <div id="download-quick-actions" style="display: flex; gap: 12px; margin-bottom: 15px; flex-wrap: wrap;">
                         <button id="btn-download-rest" class="btn-suggest watching" style="display: none; padding: 10px 16px; margin: 0; font-size: 0.9rem;" onclick="downloadRemainingEpisodes()">📥 Télécharger les épisodes restants</button>
-                        <button id="btn-download-kai" class="btn-suggest plan" style="padding: 10px 16px; margin: 0; font-size: 0.9rem; background: rgba(var(--accent-blue-rgb),0.15); border: 1px solid rgba(var(--accent-blue-rgb),0.35); color: var(--accent-blue-soft);" onclick="downloadKaiVersion()">🎬 Version Kaï</button>
+                        <button id="btn-download-kai" class="btn-suggest plan" style="padding: 10px 16px; margin: 0; font-size: 0.9rem; background: rgba(var(--accent-blue-rgb),0.15); border: 1px solid rgba(var(--accent-blue-rgb),0.35); color: var(--accent-blue-soft);" onclick="searchKaiVersions()">🎬 Chercher version Kaï</button>
                     </div>
 
                     <!-- Manual Search Input -->
@@ -4284,6 +4284,74 @@
             return titles.join('|');
         }
 
+        // Parse an episode number from a torrent title so results can be shown in
+        // episode order (1, 2, 3, ...) instead of seeder order. Resolution/codec
+        // numbers (1080p, x264, ...) are stripped first to avoid false matches.
+        function parseTorrentEpisode(title) {
+            const t = title
+                .replace(/\b(?:2160|1080|720|480|360)\s?p\b/gi, ' ')
+                .replace(/\b(?:10|8)\s?bit\b/gi, ' ')
+                .replace(/x26[45]|h26[45]|hevc|aac|flac/gi, ' ');
+            let m = t.match(/\bS\d{1,2}E(\d{1,4})\b/i)
+                 || t.match(/\b(?:E|EP|Episode|Épisode)\.?\s*(\d{1,4})\b/i);
+            if (m) return parseInt(m[1], 10);
+            m = t.match(/(?:^|[\s\-_])(\d{1,4})(?:[\s\-_.\[]|$)/);
+            return m ? parseInt(m[1], 10) : null;
+        }
+
+        // Shared rendering for the torrent results list. Sorts numbered episodes
+        // ascending (episode 1 first), then packs/specials by seeders, and wires a
+        // download button for each row.
+        function renderTorrentResults(torrents, listContainer, headerHtml = '') {
+            listContainer.innerHTML = '';
+            if (headerHtml) {
+                const h = document.createElement('p');
+                h.style = 'font-size: 0.82rem; color: var(--text-muted); margin: 0 0 8px 0;';
+                h.innerHTML = headerHtml;
+                listContainer.appendChild(h);
+            }
+            if (!torrents || torrents.length === 0) {
+                const p = document.createElement('p');
+                p.className = 'hint';
+                p.textContent = 'Aucun torrent trouvé.';
+                listContainer.appendChild(p);
+                return;
+            }
+            if (torrents.some(t => t.approximate)) {
+                const warn = document.createElement('p');
+                warn.style = 'color: var(--accent-gold); font-size: 0.85rem; margin: 0 0 8px 0;';
+                warn.textContent = '⚠️ Résultats approximatifs (aucune correspondance exacte) — vérifie le titre.';
+                listContainer.appendChild(warn);
+            }
+            const sorted = torrents.slice().sort((a, b) => {
+                const ea = a.is_pack ? null : parseTorrentEpisode(a.title);
+                const eb = b.is_pack ? null : parseTorrentEpisode(b.title);
+                if (ea !== null && eb !== null) return ea - eb;   // both episodes -> ascending
+                if (ea !== null) return -1;                        // episodes before packs/others
+                if (eb !== null) return 1;
+                return (b.seeders || 0) - (a.seeders || 0);        // others by seeders
+            });
+            sorted.forEach(t => {
+                const item = document.createElement('div');
+                item.className = 'torrent-result-item';
+                const magnetStr = (t.magnet || '').replace(/'/g, "\\'");
+                const torrentUrlStr = (t.torrent_url || '').replace(/'/g, "\\'");
+                const sourceLabel = t.source === 'animevost' ? 'AnimeVost' : 'Nyaa';
+                const sourceClass = t.source === 'animevost' ? 'source-badge--animevost' : 'source-badge--nyaa';
+                item.innerHTML = `
+                    <div class="torrent-result-info">
+                        <span class="torrent-result-title" title="${t.title}">${t.title}</span>
+                        <span class="torrent-result-meta">
+                            <span class="source-badge ${sourceClass}">${sourceLabel}</span>
+                            Taille : ${t.size} • <span style="color: var(--accent-green);">▲ ${t.seeders}</span> • <span style="color: var(--accent);">▼ ${t.leechers}</span>
+                        </span>
+                    </div>
+                    <button class="btn-suggest completed" style="padding: 6px 12px; margin: 0; font-size: 0.8rem; flex-shrink: 0;" onclick="downloadTorrent('${magnetStr}', '${torrentUrlStr}')">📥 DL</button>
+                `;
+                listContainer.appendChild(item);
+            });
+        }
+
         async function searchTorrentsNyaa(quiet = false) {
             const queryInput = document.getElementById('torrent-search-input');
             const queryText = queryInput.value.trim();
@@ -4315,40 +4383,7 @@
                 if (excludeParam) url += `&exclude=${encodeURIComponent(excludeParam)}`;
                 const res = await fetch(url);
                 const torrents = await res.json();
-
-                listContainer.innerHTML = '';
-                if (torrents.length === 0) {
-                    listContainer.innerHTML = '<p class="hint">Aucun torrent trouvé sur Nyaa.si.</p>';
-                    return;
-                }
-
-                // Warn when results are only approximate (strict matching found nothing).
-                if (torrents.some(t => t.approximate)) {
-                    const warn = document.createElement('p');
-                    warn.style = 'color: #f5a623; font-size: 0.85rem; margin: 0 0 8px 0;';
-                    warn.textContent = '⚠️ Résultats approximatifs (aucune correspondance exacte trouvée) — vérifie le titre.';
-                    listContainer.appendChild(warn);
-                }
-
-                torrents.forEach(t => {
-                    const item = document.createElement('div');
-                    item.className = 'torrent-result-item';
-                    const magnetStr = (t.magnet || '').replace(/'/g, "\\'");
-                    const torrentUrlStr = (t.torrent_url || '').replace(/'/g, "\\'");
-                    const sourceLabel = t.source === 'animevost' ? 'AnimeVost' : 'Nyaa';
-                    const sourceClass = t.source === 'animevost' ? 'source-badge--animevost' : 'source-badge--nyaa';
-                    item.innerHTML = `
-                        <div class="torrent-result-info">
-                            <span class="torrent-result-title" title="${t.title}">${t.title}</span>
-                            <span class="torrent-result-meta">
-                                <span class="source-badge ${sourceClass}">${sourceLabel}</span>
-                                Taille : ${t.size} • <span style="color: var(--accent-green);">▲ ${t.seeders}</span> • <span style="color: var(--accent);">▼ ${t.leechers}</span>
-                            </span>
-                        </div>
-                        <button class="btn-suggest completed" style="padding: 6px 12px; margin: 0; font-size: 0.8rem; flex-shrink: 0;" onclick="downloadTorrent('${magnetStr}', '${torrentUrlStr}')">📥 DL</button>
-                    `;
-                    listContainer.appendChild(item);
-                });
+                renderTorrentResults(torrents, listContainer);
             } catch (err) {
                 console.error("Nyaa torrent search failed:", err);
                 listContainer.innerHTML = '<p style="color: var(--accent); font-size: 0.9rem; margin: 0;">Erreur lors de la recherche Nyaa.si.</p>';
@@ -4536,7 +4571,10 @@
             }
         }
 
-        async function downloadKaiVersion() {
+        // Search for Kaï (Fan-Kai / Henshū condensed re-edit) versions and show
+        // them in the results list so the user can choose — there are often several
+        // (different fan groups / episode counts) and auto-grabbing one is wrong.
+        async function searchKaiVersions() {
             let queryText = '';
             if (activeDetailedData && activeDetailedData.title) {
                 const titles = [];
@@ -4548,45 +4586,18 @@
             }
             if (!queryText) return;
 
-            alertToast(`🔍 Recherche de la version Kaï (Fan-Kai / Henshū)...`);
-
-            const animeTitle = activeDetailedData ? (activeDetailedData.title.english || activeDetailedData.title.romaji) : (activeSuggestion ? activeSuggestion.title : (activeLibraryItem ? activeLibraryItem.folder_name : ""));
+            const listContainer = document.getElementById('torrent-results-list');
+            listContainer.innerHTML = '<div class="loading-screen" style="padding: 10px;"><div class="spinner" style="width: 20px; height: 20px;"></div></div>';
+            listContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
             try {
-                // Call search with type=kai
                 const res = await fetch(`/api/torrent/search?query=${encodeURIComponent(queryText)}&type=kai`);
                 const torrents = await res.json();
-                
-                if (torrents && torrents.length > 0) {
-                    const bestTorrent = torrents[0];
-                    alertToast(`🎬 Version Kaï trouvée : "${bestTorrent.title}". Envoi au client...`);
-                    
-                    const dlRes = await fetch('/api/torrent/download_batch', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            torrents: [{
-                                magnet: bestTorrent.magnet,
-                                torrent_url: bestTorrent.torrent_url,
-                                episode: "Kaï"
-                            }],
-                            anime_title: animeTitle,
-                            start_ep: 1,
-                            end_ep: 999
-                        })
-                    });
-                    const dlResult = await dlRes.json();
-                    if (dlResult.success) {
-                        alertToast(`🎉 ✅ Version Kaï ajoutée à qBittorrent.`);
-                        setTimeout(loadDashboard, 3000);
-                        return;
-                    }
-                } else {
-                    alertToast(`ℹ️ Aucune version Kaï trouvée.`);
-                }
+                renderTorrentResults(torrents, listContainer,
+                    '🎬 Versions Kaï (Fan-Kai / Henshū) — choisis-en une :');
             } catch (err) {
-                console.error("Kaï download failed:", err);
-                alertToast("❌ Erreur lors du traitement.");
+                console.error("Kaï search failed:", err);
+                listContainer.innerHTML = '<p style="color: var(--accent); font-size: 0.9rem; margin: 0;">Erreur lors de la recherche Kaï.</p>';
             }
         }
 
