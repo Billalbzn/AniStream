@@ -1393,6 +1393,31 @@
             color: var(--accent-blue);
         }
 
+        /* Per-episode quality download buttons */
+        .ep-quality-group {
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        .ep-quality-btn {
+            background: rgba(var(--accent-rgb), 0.15);
+            border: 1px solid rgba(var(--accent-rgb), 0.4);
+            color: var(--accent-soft);
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: 0.72rem;
+            padding: 5px 10px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: background 0.15s ease, color 0.15s ease;
+        }
+        .ep-quality-btn:hover {
+            background: var(--accent);
+            color: var(--white);
+        }
+
         /* ===== ENTRANCE ANIMATIONS ===== */
         @keyframes fadeInUp {
             from { opacity: 0; transform: translateY(24px); }
@@ -4446,6 +4471,36 @@
         // Shared rendering for the torrent results list. Sorts numbered episodes
         // ascending (episode 1 first), then packs/specials by seeders, and wires a
         // download button for each row.
+        // Quality parsed from a torrent title, and a preference rank for auto-pick.
+        function parseTorrentQuality(title) {
+            const m = title.match(/\b(2160|1080|720|480)\s?p\b/i);
+            return m ? m[1] + 'p' : 'SD';
+        }
+        const QUALITY_RANK = { '1080p': 4, '720p': 3, '2160p': 2, '480p': 1, 'SD': 0 };
+
+        function buildSingleTorrentRow(t) {
+            const item = document.createElement('div');
+            item.className = 'torrent-result-item';
+            const magnetStr = (t.magnet || '').replace(/'/g, "\\'");
+            const torrentUrlStr = (t.torrent_url || '').replace(/'/g, "\\'");
+            const sourceLabel = t.source === 'animevost' ? 'AnimeVost' : 'Nyaa';
+            const sourceClass = t.source === 'animevost' ? 'source-badge--animevost' : 'source-badge--nyaa';
+            item.innerHTML = `
+                <div class="torrent-result-info">
+                    <span class="torrent-result-title" title="${t.title}">${t.title}</span>
+                    <span class="torrent-result-meta">
+                        <span class="source-badge ${sourceClass}">${sourceLabel}</span>
+                        Taille : ${t.size} • <span style="color: var(--accent-green);">▲ ${t.seeders}</span> • <span style="color: var(--accent);">▼ ${t.leechers}</span>
+                    </span>
+                </div>
+                <button class="btn-suggest completed" style="padding: 6px 12px; margin: 0; font-size: 0.8rem; flex-shrink: 0;" onclick="downloadTorrent('${magnetStr}', '${torrentUrlStr}')">📥 DL</button>
+            `;
+            return item;
+        }
+
+        // Render results grouped by episode (one row per episode, a button per
+        // available quality), with a "download all in order" action. Packs/specials
+        // are listed individually below.
         function renderTorrentResults(torrents, listContainer, headerHtml = '') {
             listContainer.innerHTML = '';
             if (headerHtml) {
@@ -4467,33 +4522,112 @@
                 warn.textContent = '⚠️ Résultats approximatifs (aucune correspondance exacte) — vérifie le titre.';
                 listContainer.appendChild(warn);
             }
-            const sorted = torrents.slice().sort((a, b) => {
-                const ea = a.is_pack ? null : parseTorrentEpisode(a.title);
-                const eb = b.is_pack ? null : parseTorrentEpisode(b.title);
-                if (ea !== null && eb !== null) return ea - eb;   // both episodes -> ascending
-                if (ea !== null) return -1;                        // episodes before packs/others
-                if (eb !== null) return 1;
-                return (b.seeders || 0) - (a.seeders || 0);        // others by seeders
+
+            // Bucket numbered episodes; packs/specials go to "others".
+            const episodeMap = new Map();   // epNum -> [torrents]
+            const others = [];
+            torrents.forEach(t => {
+                const ep = t.is_pack ? null : parseTorrentEpisode(t.title);
+                if (ep === null) { others.push(t); return; }
+                if (!episodeMap.has(ep)) episodeMap.set(ep, []);
+                episodeMap.get(ep).push(t);
             });
-            sorted.forEach(t => {
-                const item = document.createElement('div');
-                item.className = 'torrent-result-item';
-                const magnetStr = (t.magnet || '').replace(/'/g, "\\'");
-                const torrentUrlStr = (t.torrent_url || '').replace(/'/g, "\\'");
-                const sourceLabel = t.source === 'animevost' ? 'AnimeVost' : 'Nyaa';
-                const sourceClass = t.source === 'animevost' ? 'source-badge--animevost' : 'source-badge--nyaa';
-                item.innerHTML = `
+            const episodes = [...episodeMap.keys()].sort((a, b) => a - b);
+
+            if (episodes.length >= 2) {
+                const allBtn = document.createElement('button');
+                allBtn.className = 'btn-suggest watching';
+                allBtn.style = 'width: 100%; margin: 0 0 10px 0; padding: 9px; font-size: 0.85rem;';
+                allBtn.textContent = `📥 Tout télécharger dans l'ordre (${episodes.length} épisodes)`;
+                allBtn.onclick = () => downloadAllEpisodesInOrder(episodeMap, episodes, allBtn);
+                listContainer.appendChild(allBtn);
+            }
+
+            episodes.forEach(ep => {
+                const byQuality = {};
+                episodeMap.get(ep).forEach(t => {
+                    const q = parseTorrentQuality(t.title);
+                    if (!byQuality[q] || (t.seeders || 0) > (byQuality[q].seeders || 0)) byQuality[q] = t;
+                });
+                const quals = Object.keys(byQuality).sort((a, b) => (QUALITY_RANK[b] || 0) - (QUALITY_RANK[a] || 0));
+                const btns = quals.map(q => {
+                    const t = byQuality[q];
+                    const m = (t.magnet || '').replace(/'/g, "\\'");
+                    const u = (t.torrent_url || '').replace(/'/g, "\\'");
+                    return `<button class="ep-quality-btn" title="${q} • ▲ ${t.seeders} seeders" onclick="downloadTorrent('${m}', '${u}')">${q}</button>`;
+                }).join('');
+                const first = episodeMap.get(ep)[0];
+                const src = first.source === 'animevost' ? 'AnimeVost' : 'Nyaa';
+                const srcClass = first.source === 'animevost' ? 'source-badge--animevost' : 'source-badge--nyaa';
+                const row = document.createElement('div');
+                row.className = 'torrent-result-item';
+                row.innerHTML = `
                     <div class="torrent-result-info">
-                        <span class="torrent-result-title" title="${t.title}">${t.title}</span>
+                        <span class="torrent-result-title">Épisode ${ep}</span>
                         <span class="torrent-result-meta">
-                            <span class="source-badge ${sourceClass}">${sourceLabel}</span>
-                            Taille : ${t.size} • <span style="color: var(--accent-green);">▲ ${t.seeders}</span> • <span style="color: var(--accent);">▼ ${t.leechers}</span>
+                            <span class="source-badge ${srcClass}">${src}</span> ${quals.length} qualité(s)
                         </span>
                     </div>
-                    <button class="btn-suggest completed" style="padding: 6px 12px; margin: 0; font-size: 0.8rem; flex-shrink: 0;" onclick="downloadTorrent('${magnetStr}', '${torrentUrlStr}')">📥 DL</button>
+                    <div class="ep-quality-group">${btns}</div>
                 `;
-                listContainer.appendChild(item);
+                listContainer.appendChild(row);
             });
+
+            others.sort((a, b) => (b.seeders || 0) - (a.seeders || 0));
+            if (others.length && episodes.length) {
+                const sep = document.createElement('p');
+                sep.style = 'font-size: 0.78rem; color: var(--text-muted); margin: 12px 0 6px;';
+                sep.textContent = 'Packs / autres :';
+                listContainer.appendChild(sep);
+            }
+            others.forEach(t => listContainer.appendChild(buildSingleTorrentRow(t)));
+        }
+
+        // Send the best torrent of every episode (preferred quality, then seeders)
+        // to qBittorrent in ascending episode order.
+        async function downloadAllEpisodesInOrder(episodeMap, episodes, btn) {
+            const animeTitle = activeDetailedData
+                ? (activeDetailedData.title.english || activeDetailedData.title.romaji)
+                : (activeSuggestion ? activeSuggestion.title : (activeLibraryItem ? activeLibraryItem.folder_name : ''));
+            if (!animeTitle) { alertToast('❌ Anime inconnu.'); return; }
+
+            const batchTorrents = episodes.map(ep => {
+                const best = episodeMap.get(ep).slice().sort((a, b) => {
+                    const qa = QUALITY_RANK[parseTorrentQuality(a.title)] || 0;
+                    const qb = QUALITY_RANK[parseTorrentQuality(b.title)] || 0;
+                    if (qb !== qa) return qb - qa;
+                    return (b.seeders || 0) - (a.seeders || 0);
+                })[0];
+                return { magnet: best.magnet, torrent_url: best.torrent_url, episode: ep };
+            });
+
+            const original = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = `📥 Envoi de ${batchTorrents.length} épisodes...`; }
+            alertToast(`📥 Envoi de ${batchTorrents.length} épisodes (ordre 1→N) au client...`);
+            try {
+                const dlRes = await fetch('/api/torrent/download_batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        torrents: batchTorrents,
+                        anime_title: animeTitle,
+                        start_ep: episodes[0],
+                        end_ep: episodes[episodes.length - 1]
+                    })
+                });
+                const r = await dlRes.json();
+                if (r.success) {
+                    alertToast(`🎉 ✅ ${batchTorrents.length} épisodes ajoutés à qBittorrent.`);
+                    setTimeout(loadDashboard, 3000);
+                } else {
+                    alertToast('❌ Échec de l\'envoi du lot.');
+                }
+            } catch (e) {
+                console.error('Batch download failed:', e);
+                alertToast('❌ Erreur lors de l\'envoi du lot.');
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = original; }
+            }
         }
 
         async function searchTorrentsNyaa(quiet = false) {
