@@ -1,0 +1,20 @@
+name: Design-System Health (Lyse)
+
+# Guards against design-system drift: fails the build if the deterministic
+# health score drops below the floor defined in tools/lyse_score.py.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lyse-score:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run design-system health score
+        run: python tools/lyse_score.py

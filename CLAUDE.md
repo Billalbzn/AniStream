@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **Before editing UI or `app.py`, read [`AGENTS.md`](AGENTS.md)** — the design &
+> code contract (token rules, accessibility checklist, backend safety). Run
+> `python tools/lyse_score.py` before committing UI changes; the score must not drop.
+
 ## Project overview
 
 AvocadoStream is a single-user, local-only anime media server/launcher ("AvocadoList Builder"). It's a Python stdlib-only HTTP server (`app.py`) that serves a single-page frontend (`index.html`) and exposes a JSON API for:
