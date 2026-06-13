@@ -687,6 +687,36 @@
             transform: translate(-50%, -50%) scale(1);
         }
 
+        /* Title caption that slides up on hover */
+        .card-hover-info {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding: 26px 10px 11px;
+            background: linear-gradient(to top, rgba(var(--black-rgb), 0.95) 0%, rgba(var(--black-rgb), 0.5) 55%, transparent 100%);
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            z-index: 16;
+            pointer-events: none;
+        }
+        .poster-card:hover .card-hover-info {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .card-hover-title {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: var(--white);
+            line-height: 1.25;
+            text-shadow: 0 2px 6px rgba(var(--black-rgb), 0.9);
+        }
+
         /* PROGRESS BAR IN POSTER CARD */
         .card-progress-bar {
             position: absolute;
@@ -4366,6 +4396,21 @@
             card.dataset.kbd = '1';
             card.tabIndex = 0;
             card.setAttribute('role', 'button');
+            // Lazily add a title caption revealed on hover (the poster's innerHTML is
+            // rebuilt once on image load, before any hover, so a post-hover insert sticks).
+            card.addEventListener('mouseenter', () => _ensureCardCaption(card));
+        }
+
+        function _ensureCardCaption(card) {
+            if (card.querySelector('.card-hover-info')) return;
+            const img = card.querySelector('img');
+            let title = (card.getAttribute('aria-label') || (img && img.alt) || '')
+                .replace(/^Affiche de\s*/i, '').trim();
+            if (!title) return;
+            const info = document.createElement('div');
+            info.className = 'card-hover-info';
+            info.innerHTML = `<span class="card-hover-title">${title}</span>`;
+            card.appendChild(info);
         }
         const _cardObserver = new MutationObserver(muts => {
             for (const m of muts) {
